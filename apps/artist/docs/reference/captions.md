@@ -126,3 +126,26 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   parser of its own); captions muxed into the MP4/WebM as a text track (Mediabunny's output path
   here writes video and audio only, and burn-in plus a sidecar covers both uses); and a caption
   panel of its own (the clips are text clips, so the inspector already edits them).
+
+## Chapters row (ESCSUITE-472)
+
+The export dialog's **Chapters** row (`ExportDialog.tsx`, after Captions) turns the timeline's markers
+into a YouTube chapter list: **Copy chapters** (clipboard) and **Download chapters .txt**
+(`<project>-chapters.txt`). The formatting is the pure `utils/youtubeChapters.ts`
+(`buildYoutubeChapters`).
+
+- **Range.** Times are relative to the selected section (in/out points or the `timeRange` prop) when
+  there is one, else the whole timeline from 0. Markers outside `[start, end)` are dropped, the rest
+  offset. An `Intro` line at 0:00 is added when the first marker is later (whole seconds, so a marker
+  within the first second counts as 0:00 and needs no Intro). Note the row follows the section even
+  though "Export Full Video" is also offered.
+- **Format.** One `M:SS Title` line per chapter; every line is `H:MM:SS` when the range is an hour or
+  longer. An unlabelled marker is `Chapter N` (its place among the in-range markers); whitespace in a
+  label collapses to one line.
+- **Warnings, never blocking.** Shown as `role="status"` notices naming the rule: fewer than three
+  chapters, and any chapter (the last one runs to the end of the range) under ten seconds. First
+  timestamp 0:00 and ascending order hold by construction. Copy reports "Chapters copied" through a
+  polite live region (or "Could not copy chapters" when the clipboard refuses).
+- **No markers in range: no row** (rather than a hint; simpler, and the Markers feature is its own
+  discovery).
+- **Out of scope:** chapters embedded in the MP4/WebM, and any upload.

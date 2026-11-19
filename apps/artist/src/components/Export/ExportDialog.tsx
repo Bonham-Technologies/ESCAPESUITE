@@ -47,6 +47,7 @@ import { analytics } from '../../utils/analytics';
 import { sendMessage } from '../../utils/integration';
 import { downloadBlob } from '../../utils/downloadBlob';
 import { serializeCaptions } from '../../core/captions';
+import { buildYoutubeChapters } from '../../utils/youtubeChapters';
 import type { CaptionCue, CaptionFormat } from '../../core/captions';
 import type { ExportOptions, ExportProgress } from '../../store/types';
 import { formatTime, formatFileSize } from '../../utils/timeUtils';
@@ -143,6 +144,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   const projectResolution = useEditorStore((state) => state.project.resolution);
   const inPoint = useEditorStore((state) => state.inPoint);
   const outPoint = useEditorStore((state) => state.outPoint);
+  const markers = useEditorStore((state) => state.markers);
 
   // Use prop timeRange if provided, otherwise derive from in/out points.
   // Memoised so handleExport, which lists it as a dependency, is not rebuilt
@@ -354,6 +356,27 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     const blob = new Blob([serializeCaptions(captionCues, format)], { type: CAPTION_MIME_TYPES[format] });
     downloadBlob(blob, `${projectName || 'export'}.${format}`);
   };
+  // ESCSUITE-472: the markers as YouTube chapters, relative to the selected
+  // section when there is one, else the whole timeline. Only when a marker
+  // falls in that range.
+  const chapters = useMemo(
+    () => buildYoutubeChapters(markers, timeRange ?? { start: 0, end: calculateTimelineDuration(clips) }),
+    [markers, timeRange, clips]
+  );
+  const [chaptersCopy, setChaptersCopy] = useState<'copied' | 'failed' | null>(null);
+  useEffect(() => setChaptersCopy(null), [chapters.text]);
+  const copyChapters = async () => {
+    try {
+      await navigator.clipboard.writeText(chapters.text);
+      setChaptersCopy('copied');
+    } catch {
+      setChaptersCopy('failed');
+    }
+  };
+  const downloadChapters = () => {
+    downloadBlob(new Blob([chapters.text + '\n'], { type: 'text/plain' }), `${projectName || 'export'}-chapters.txt`);
+  };
+
   // What the whole timeline exports as, and what the click exports: the
   // section when one is selected. Only the stretch encoded is held to the
   // three-hour limit (ESCSUITE-367), so a section of a longer timeline exports.
@@ -1201,6 +1224,35 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                       Download .vtt
                     </button>
                   </div>
+                </div>
+              )}
+
+              {/* ESCSUITE-472: the markers as YouTube chapters. Only when a
+                  marker falls in the exported range. */}
+              {chapters.chapters.length > 0 && (
+                <div className={styles.section} role="group" aria-labelledby="export-chapters-label">
+                  <span className={styles.label} id="export-chapters-label">Chapters</span>
+                  <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
+                    <button className={styles.cancelButton} onClick={copyChapters}>
+                      Copy chapters
+                    </button>
+                    <button className={styles.cancelButton} onClick={downloadChapters}>
+                      Download chapters .txt
+                    </button>
+                  </div>
+                  <span className={styles.srOnly} role="status" aria-live="polite" aria-atomic="true">
+                    {chaptersCopy === 'copied' ? 'Chapters copied' : chaptersCopy === 'failed' ? 'Could not copy chapters' : ''}
+                  </span>
+                  {chaptersCopy && (
+                    <div className={styles.summary} aria-hidden="true">
+                      {chaptersCopy === 'copied' ? 'Copied' : 'Could not copy: use Download chapters .txt'}
+                    </div>
+                  )}
+                  {chapters.warnings.map((warning) => (
+                    <div className={styles.summary} role="status" key={warning}>
+                      {warning}
+                    </div>
+                  ))}
                 </div>
               )}
             </>
