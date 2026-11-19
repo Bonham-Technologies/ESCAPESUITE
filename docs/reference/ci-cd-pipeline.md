@@ -3,7 +3,7 @@
 
 GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and PR:
 
-Eight jobs, with `ci-status` as the single required check. The benchmarks live in a separate workflow, `perf.yml`, which is informational and was never one of its dependencies:
+Nine jobs, with `ci-status` as the single required check. The benchmarks live in a separate workflow, `perf.yml`, which is informational and was never one of its dependencies:
 
 | Job | Purpose | Runs On |
 |-----|---------|---------|
@@ -13,8 +13,44 @@ Eight jobs, with `ci-status` as the single required check. The benchmarks live i
 | `kit-docker` | Builds the reference headless-artist Docker image and smoke-tests it (a real `docker run` render + `--version`) | PRs and pushes |
 | `standalone` | Offline single-file builds + standalone E2E, then the combined `dist/` build + production-layout (single-origin) E2E | PRs and pushes |
 | `e2e` | Full Playwright suite (journey included) + headless-artist Chromium tests; lists pass-on-retry tests (see below) | PRs and pushes |
+| `e2e-cross-browser` | The e2e specs a PR adds or changes, in Firefox and WebKit (plus the accessibility suite on a Playwright bump); a no-op success when there are none (see below, ESCSUITE-478) | PRs (no-op on pushes) |
 | `deploy` | Vercel deployment | After E2E passes (skipped for Dependabot: its PRs get no secrets) |
 | `ci-status` | Summary/gate job | All PRs |
+
+**A skipped `ci-status` would pass the ruleset** (ESCSUITE-477). `main`'s ruleset requires a check
+run named `ci-status` (strict), and GitHub counts a skipped check run as passing. `ci.yml` also
+triggers on `pull_request_target`, only so the changesets "Version Packages" PR (opened with
+`GITHUB_TOKEN`, so `pull_request` never fires for it) gets CI. On that event every job, `ci-status`
+included, is skipped unless the actor is `github-actions[bot]` and the head is in this repository
+(ESCSUITE-122), and a skipped job still reports a check run. Until ESCSUITE-477 that check run was
+named `ci-status`, so on every other PR the gate was met seconds after a push, before the real
+`pull_request` run reached `ci-status`; auto-merge merged Dependabot #1102 and #1104 that way while
+their CI was still running.
+
+- **The fix.** The `ci-status` job has a `name:` expression that mirrors its `if:`: it is
+  `ci-status` when the job runs (push, `pull_request`, and the bot's `pull_request_target`) and
+  something else otherwise. GitHub does not evaluate a skipped job's name expression; the check
+  run carries the expression's raw text (probed on 2026-11-17 with a throwaway workflow: a skipped
+  job reported `github.event_name == 'pull_request_target' && 'probe-real' || 'probe-skipped-if'`,
+  while a running one reported its evaluated name). Either way the skipped check run is not named
+  `ci-status`, so while the real run is in progress the required check is missing ("Expected")
+  and blocks the merge. The job's key, its `if:`, its `needs:` and every check in its script are
+  unchanged. The other jobs still report skipped check runs on `pull_request_target`
+  (`lint-and-typecheck`, `test`, …); none is required.
+- **How to see it on a PR.** The head commit's checks list one `ci-status`, from the
+  `pull_request` run (pending until the jobs it needs finish), plus a skipped check with the long
+  expression as its name. `gh api repos/{owner}/{repo}/commits/<sha>/check-runs?check_name=ci-status
+  --jq '.check_runs[].conclusion'` must never print `skipped`.
+- **Rejected alternatives.** Moving the `pull_request_target` path into its own workflow does not
+  help by itself: the workflow starts for every PR (the trigger cannot filter by actor or head
+  branch), and its skipped jobs report check runs under the same names. A reusable workflow
+  (`workflow_call`) called from two thin entry workflows renames every check to
+  `<caller job> / ci-status`, so the ruleset would need changing in step. Both duplicate or move
+  ~800 lines; the name expression is one line.
+- **Guarded by** `scripts/ci-status-required-check.test.mjs` (`pnpm test:scripts`): no job in any
+  workflow may report a skipped check run named `ci-status`, and evaluating `ci-status`'s `if:` and
+  name for push, `pull_request` and `pull_request_target` (owner, Dependabot, fork, the bot) must
+  give `ci-status` exactly when the job runs. If you change the `if:`, change the name to match.
 
 The `pnpm perf` benchmarks run from `.github/workflows/perf.yml` instead: pushes to `main`/`dev`, PRs labelled `perf`, and `workflow_dispatch`; informational only, never gates, skipped for Dependabot.
 
@@ -77,6 +113,54 @@ The DCO check (`.github/workflows/dco.yml`, ESCSUITE-419) is a fourth workflow, 
   `ARTIST_FUZZ_SEED=<seed> ARTIST_FUZZ_RUNS=5000 pnpm --filter=@escapesuite/artist exec vitest run src/store/__tests__/timelineInvariants.property.test.ts`.
   The soak at nightly size:
   `SOAK_CYCLES=200 SOAK_RELOADS=30 pnpm --filter=@escapesuite/e2e exec playwright test tests/escapeartist/soak.spec.ts --project=chromium-strict`.
+
+**Changed specs in Firefox and WebKit** (`e2e-cross-browser`, ESCSUITE-478):
+- **Why.** `e2e` runs Chromium only and the full Firefox/WebKit suite runs only in the Nightly,
+  so a PR that added a regression spec passed `ci-status`, merged, and turned the next Nightly
+  red in another browser (reverts #1078 and #1119, both WebKit; #1061, a Playwright bump whose
+  Firefox crashed under axe, ESCSUITE-453).
+- **What it runs.** On a pull request, "Pick changed specs" runs
+  `node apps/e2e/scripts/changed-specs.mjs --base <PR base sha>` on the runner's own Node, before
+  any install. It reads `git diff --name-status <base>...HEAD -- apps/e2e/tests/` and keeps every
+  added, modified or renamed `*.spec.ts` under `apps/e2e/tests/`, except the folders
+  `playwright.config.ts` ignores (`standalone/`, `production/`, `perf/`); deleted files and
+  non-spec files are dropped. When the PR changes the `@playwright/test` or `playwright` line of
+  any `package.json` (a Dependabot bump brings new Firefox and WebKit builds), it adds the
+  accessibility suite: every spec in `tests/accessibility/` and every spec that runs axe
+  (imports `utils/accessibility` or `@axe-core/playwright`), about 260 tests over both browsers.
+  The job then runs `playwright test <specs> --project=firefox --project=webkit
+  --pass-with-no-tests` from `apps/e2e` with `CI=true`, `E2E_CROSS_BROWSER=1` and
+  `E2E_PULSE_NULL_SINK=1`: the Nightly's projects and retries (2), each spec's own
+  `test.skip(browserName …)` honoured. `@nightly` tests stay out, as in every non-nightly run.
+  The step summary lists each spec and why it runs.
+- **No-op path.** With no spec to run (most PRs), or on a push (the Nightly covers `main`; the
+  step skips the script there), "Pick changed specs" outputs `count=0` and every later step is
+  skipped by its own `if:`, so the job succeeds in well under a minute and adds no browser
+  time. It has no job-level `if:` on purpose: `ci-status` fails any need whose result is not `success`, so a skipped job would block every PR.
+  Like every job, it hangs off `lint-and-typecheck` and `test` (not `build`; it starts its own dev
+  servers), so it runs beside `e2e`.
+- **Safety.** The spec list reaches the run step through `env` and is word-split there, so the
+  script refuses (exits 1, failing the job) any spec path with characters other than
+  `A-Z a-z 0-9 . _ - /`; it reads git's `-z` output so an odd name is checked as itself. The job
+  runs the PR's code with a read-only token (`permissions: contents: read`), no secrets, and
+  checks out with `persist-credentials: false`.
+- **Setup** mirrors the Nightly: the capped and retried `playwright install firefox webkit` and
+  `install-deps firefox webkit`, and the same PulseAudio pipe sink (see **Audio sink** above),
+  without which Firefox recording tests time out at Start. Browser cache key
+  `playwright-firefox-webkit-…`, restoring from the Nightly's `playwright-all-…` cache on a miss.
+- **Output.** `e2e-cross-browser-flaky` (the `report-flaky.mjs` list; the steward's recipe reads
+  `e2e-flaky` and is unaffected), `playwright-report-cross-browser` (30 days) and
+  `test-results-cross-browser` (on failure, 7 days).
+- **Cost.** One regression spec (16 tests over both browsers) took 81 s locally, dev-server start
+  included; add about 2–3 min of setup on a runner. A Playwright bump's accessibility suite is
+  an estimated 15–20 min. Replace these with measured CI times once runs exist.
+- **Locally:** `node apps/e2e/scripts/changed-specs.mjs --base origin/main` prints the list;
+  `CI=true E2E_CROSS_BROWSER=1 pnpm --filter=@escapesuite/e2e exec playwright test <specs>
+  --project=firefox --project=webkit` runs it (start the PulseAudio sink first for Firefox).
+  Tests: `apps/e2e/scripts/changed-specs.test.mjs` (`pnpm test:scripts`), which also checks the
+  job's wiring in `ci.yml`.
+- **Not covered:** a PR that changes only a helper in `apps/e2e/utils/`, `playwright.config.ts`
+  or app code runs nothing here; the Nightly still catches those.
 
 **CI Optimizations:**
 - Concurrency control cancels in-progress runs when new commits are pushed to a PR or to
@@ -274,6 +358,8 @@ The DCO check (`.github/workflows/dco.yml`, ESCSUITE-419) is a fourth workflow, 
   green `ci-status`, and #913 (`@axe-core/playwright`) once merged green without a browser run
   and turned main's e2e red. `deploy` alone stays skipped, because Dependabot PRs get no
   `VERCEL_TOKEN`.
+- A bump of `@playwright/test` or `playwright` also runs the accessibility suite in Firefox and
+  WebKit in `e2e-cross-browser` (ESCSUITE-478), since a new Playwright brings new builds of both.
 - Weekly updates for all apps
 - Grouped PRs: React, testing, linting
 - GitHub Actions version updates
