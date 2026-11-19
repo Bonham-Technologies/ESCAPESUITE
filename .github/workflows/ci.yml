@@ -10,6 +10,8 @@ on:
   # NOTE: Dependabot PRs trigger BOTH pull_request and pull_request_target, so the two
   # entry-point jobs (lint-and-typecheck, test) filter out pull_request_target for
   # Dependabot (pull_request handles it). Everything else hangs off those two jobs.
+  # Those skipped jobs still report skipped check runs, so `ci-status` takes a name
+  # expression that is never `ci-status` when it is skipped (ESCSUITE-477).
   pull_request_target:
     branches: [main]
     types: [opened, synchronize, reopened]
@@ -640,6 +642,189 @@ jobs:
           path: apps/e2e/test-results/
           retention-days: 7
 
+  # E2E in Firefox and WebKit for what a PR changes (ESCSUITE-478). The `e2e` job above
+  # runs Chromium only, and the full Firefox/WebKit suite runs in the Nightly on main,
+  # so a PR that added a spec could pass ci-status here and turn the next Nightly red.
+  # On a pull request, apps/e2e/scripts/changed-specs.mjs lists every spec under
+  # apps/e2e/tests the PR adds or changes, plus the accessibility suite when it bumps
+  # Playwright (a new Firefox/WebKit; ESCSUITE-453's axe crash), and this job runs them
+  # in the `firefox` and `webkit` projects, each spec's own `test.skip(browserName …)`
+  # included. Setup mirrors the Nightly's (browsers, apt deps, PulseAudio sink).
+  # With nothing to run (no spec changed, or a push: the Nightly covers main) every
+  # step after "Pick changed specs" is skipped and the job succeeds in seconds. It must
+  # never skip itself with a job-level `if:`: ci-status fails any need not `success`.
+  e2e-cross-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # Hangs off the entry points only (not `build`): it starts its own dev servers, so
+    # it runs beside `e2e` instead of after it, and inherits their pull_request_target filter.
+    needs: [lint-and-typecheck, test]
+    # It runs the PR's own code (install, dev servers, specs) and writes nothing to GitHub.
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
+          # The whole history, so `git diff <base>...HEAD` finds the merge base (~11 MB).
+          fetch-depth: 0
+          # Nothing after checkout talks to the remote, so the token is not left in .git/config.
+          persist-credentials: false
+
+      # Plain `node` (the runner's own) and git: nothing to install for this step.
+      - name: Pick changed specs
+        id: specs
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ] && [ "$EVENT_NAME" != "pull_request_target" ]; then
+            echo "Not a pull request: the Nightly runs Firefox and WebKit on this branch."
+            { echo "specs="; echo "count=0"; echo "playwright_bump=false"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          node apps/e2e/scripts/changed-specs.mjs --base "$BASE_SHA"
+
+      - name: Setup pnpm
+        if: steps.specs.outputs.count != '0'
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - name: Setup Node.js
+        if: steps.specs.outputs.count != '0'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        if: steps.specs.outputs.count != '0'
+        run: pnpm install --frozen-lockfile
+
+      # Its own key (Firefox and WebKit; the `e2e` job's cache holds Chromium alone).
+      # A miss falls back to the Nightly's all-browsers cache from main, which has both.
+      - name: Cache Playwright browsers
+        if: steps.specs.outputs.count != '0'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-firefox-webkit-${{ runner.os }}-${{ hashFiles('apps/e2e/package.json', 'services/headless-artist/package.json') }}
+          restore-keys: |
+            playwright-all-${{ runner.os }}-${{ hashFiles('apps/e2e/package.json', 'services/headless-artist/package.json') }}
+
+      # Same split, cap and retry as the other browser installs (see the standalone job).
+      # After a fallback restore the browsers are already there and this returns at once.
+      - name: Install Playwright browsers (cache miss)
+        if: steps.specs.outputs.count != '0' && steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 8
+        run: |
+          for attempt in 1 2; do
+            if pnpm --filter=@escapesuite/e2e exec playwright install firefox webkit; then
+              exit 0
+            fi
+            echo "::warning::playwright install failed (attempt ${attempt}/2)"
+            [ "$attempt" = "2" ] || sleep 20
+          done
+          echo "::error::playwright install failed after 2 attempts"
+          exit 1
+
+      - name: Install Playwright system dependencies
+        if: steps.specs.outputs.count != '0'
+        timeout-minutes: 8
+        run: |
+          for attempt in 1 2; do
+            if pnpm --filter=@escapesuite/e2e exec playwright install-deps firefox webkit; then
+              exit 0
+            fi
+            echo "::warning::playwright install-deps failed (attempt ${attempt}/2)"
+            [ "$attempt" = "2" ] || sleep 20
+          done
+          echo "::error::playwright install-deps failed after 2 attempts"
+          exit 1
+
+      # As in nightly.yml (ESCSUITE-389, ESCSUITE-396): without a sound device Firefox's
+      # AudioContext never resumes and every recording test times out; the pipe sink
+      # timed by the system clock keeps an unmuted <video> playing.
+      - name: Start a PulseAudio sink
+        if: steps.specs.outputs.count != '0'
+        timeout-minutes: 8
+        run: |
+          installed=false
+          for attempt in 1 2; do
+            if sudo apt-get install -y --no-install-recommends pulseaudio; then
+              installed=true
+              break
+            fi
+            echo "::warning::pulseaudio install failed (attempt ${attempt}/2)"
+            [ "$attempt" = "2" ] || { sleep 20; sudo apt-get update || true; }
+          done
+          if [ "$installed" != "true" ]; then
+            echo "::error::pulseaudio install failed after 2 attempts"
+            exit 1
+          fi
+          if ! pulseaudio --start --exit-idle-time=-1; then
+            echo "::error::pulseaudio --start failed"
+            exit 1
+          fi
+          pactl load-module module-pipe-sink sink_name=ci_sink \
+            file="$RUNNER_TEMP/pulse-sink.fifo" use_system_clock_for_timing=yes
+          pactl set-default-sink ci_sink
+          sinks=$(pactl list short sinks)
+          echo "$sinks"
+          if ! grep -q ci_sink <<<"$sinks"; then
+            echo "::error::PulseAudio started but its sink is not listed"
+            exit 1
+          fi
+
+      # Retries as the Nightly runs these projects (2 in CI). `--pass-with-no-tests`: a
+      # changed spec can hold only @nightly tests, which every non-nightly run leaves out.
+      - name: Run changed specs in Firefox and WebKit
+        if: steps.specs.outputs.count != '0'
+        working-directory: apps/e2e
+        env:
+          CI: true
+          E2E_CROSS_BROWSER: '1'
+          E2E_PULSE_NULL_SINK: '1'
+          SPECS: ${{ steps.specs.outputs.specs }}
+        run: |
+          # Space-separated paths that changed-specs.mjs has checked are plain
+          # [A-Za-z0-9._/-]; split them into arguments, with globbing off.
+          set -f
+          # shellcheck disable=SC2086
+          pnpm exec playwright test $SPECS --project=firefox --project=webkit --pass-with-no-tests
+
+      - name: Report flaky tests
+        if: always() && steps.specs.outputs.count != '0'
+        working-directory: apps/e2e
+        run: node scripts/report-flaky.mjs playwright-results.json flaky.json
+
+      - name: Upload flaky test list
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && steps.specs.outputs.count != '0'
+        with:
+          name: e2e-cross-browser-flaky
+          path: apps/e2e/flaky.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Upload Playwright Report
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always() && steps.specs.outputs.count != '0'
+        with:
+          name: playwright-report-cross-browser
+          path: apps/e2e/playwright-report/
+          retention-days: 30
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure() && steps.specs.outputs.count != '0'
+        with:
+          name: test-results-cross-browser
+          path: apps/e2e/test-results/
+          retention-days: 7
+
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -766,9 +951,16 @@ jobs:
 
   # Summary job that reports overall status — the single required check.
   ci-status:
+    # The check run is `ci-status` exactly when this job runs (the same test as `if:`
+    # below). A skipped job would otherwise report a skipped `ci-status`, which the
+    # ruleset counts as passing: on pull_request_target every PR but the changesets
+    # bot's passed the gate seconds after a push, before the real pull_request run
+    # finished (ESCSUITE-477). GitHub leaves a skipped job's name expression
+    # unevaluated, so the skipped check run is named after this expression's text.
+    name: ${{ (github.event_name != 'pull_request_target' || (github.actor == 'github-actions[bot]' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ci-status' || 'ci-status-not-required-here' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [lint-and-typecheck, test, build, standalone, e2e, kit-docker, deploy]
+    needs: [lint-and-typecheck, test, build, standalone, e2e, e2e-cross-browser, kit-docker, deploy]
     # Always run, but skip for pull_request_target from Dependabot and regular users
     # (Dependabot PRs use pull_request workflow, not pull_request_target)
     if: |
@@ -806,6 +998,13 @@ jobs:
           # pushes to main/dev
           if [ "${{ needs.e2e.result }}" != "success" ]; then
             echo "E2E tests failed"
+            exit 1
+          fi
+
+          # The PR's added or changed specs in Firefox and WebKit (ESCSUITE-478);
+          # a no-op success when there are none
+          if [ "${{ needs.e2e-cross-browser.result }}" != "success" ]; then
+            echo "E2E tests in Firefox/WebKit failed"
             exit 1
           fi
 
