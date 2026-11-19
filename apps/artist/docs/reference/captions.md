@@ -134,11 +134,15 @@ into a YouTube chapter list: **Copy chapters** (clipboard) and **Download chapte
 (`<project>-chapters.txt`). The formatting is the pure `utils/youtubeChapters.ts`
 (`buildYoutubeChapters`).
 
-- **Range.** Times are relative to the selected section (in/out points or the `timeRange` prop) when
-  there is one, else the whole timeline from 0. Markers outside `[start, end)` are dropped, the rest
-  offset. An `Intro` line at 0:00 is added when the first marker is later (whole seconds, so a marker
-  within the first second counts as 0:00 and needs no Intro). Note the row follows the section even
-  though "Export Full Video" is also offered.
+- **Range.** Times count from the start of the file the user exports. Without a section, that is the
+  whole timeline from 0. With one (in/out points or the `timeRange` prop) the dialog offers both
+  "Export Section" and "Export Full Video", so the row shows a **Section / Full video** radio pair:
+  Section by default, switched to whichever the last export from the dialog wrote
+  (`handleExport` sets it; the Advanced download exports the section). Markers outside
+  `[start, end)` are dropped, the rest offset. An `Intro` line at 0:00 is added when the first
+  marker is later (whole seconds, so a marker within the first second counts as 0:00 and needs no
+  Intro). The row shows when a marker falls in either range; when the picked one has none, both
+  buttons are disabled and point (`aria-describedby`) at a "No markers in the section." line.
 - **Format.** One `M:SS Title` line per chapter; every line is `H:MM:SS` when the range is an hour or
   longer. An unlabelled marker is `Chapter N` (its place among the in-range markers); whitespace in a
   label collapses to one line.
@@ -146,6 +150,7 @@ into a YouTube chapter list: **Copy chapters** (clipboard) and **Download chapte
   chapters, and any chapter (the last one runs to the end of the range) under ten seconds. First
   timestamp 0:00 and ascending order hold by construction. Copy reports "Chapters copied" through a
   polite live region (or "Could not copy chapters" when the clipboard refuses).
-- **No markers in range: no row** (rather than a hint; simpler, and the Markers feature is its own
-  discovery).
+- **No markers at all: no row** (rather than a hint; simpler, and the Markers feature is its own
+  discovery). Tests: `utils/youtubeChapters.test.ts`, `components/Export/ExportDialog.chapters.test.tsx`,
+  and the e2e `tests/regressions/ESCSUITE-472.spec.ts`.
 - **Out of scope:** chapters embedded in the MP4/WebM, and any upload.

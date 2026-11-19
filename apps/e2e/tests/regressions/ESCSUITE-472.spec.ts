@@ -6,8 +6,10 @@ import { waitForAppReady } from '../../utils/ready'
  * ESCSUITE-472: the timeline's markers can be copied, or saved as a .txt, as a
  * YouTube chapter list from the export dialog: one `M:SS Title` line per
  * marker, times from the start of the exported range, an "Intro" at 0:00 when
- * the first marker is later, "Chapter N" for an unlabelled one. The row is
- * left out when there is no marker. A list YouTube would not accept (fewer
+ * the first marker is later, "Chapter N" for an unlabelled one. With in and
+ * out points set the list is timed from the section (markers outside it
+ * dropped) unless "Full video" is picked, matching the two export buttons.
+ * The row is left out when there is no marker. A list YouTube would not accept (fewer
  * than three chapters, one under ten seconds) shows a warning naming the rule.
  *
  * A 120 s tone is the timeline; nothing is exported, so this runs everywhere.
@@ -17,7 +19,9 @@ import { waitForAppReady } from '../../utils/ready'
 
 const TONE_SECONDS = 120
 
-function projectFile(markerTimes: Array<[number, string]>): Buffer {
+type Range = { inPoint: number; outPoint: number }
+
+function projectFile(markerTimes: Array<[number, string]>, range?: Range): Buffer {
   return Buffer.from(
     JSON.stringify({
       version: 1,
@@ -53,8 +57,8 @@ function projectFile(markerTimes: Array<[number, string]>): Buffer {
         },
       },
       editor: {
-        inPoint: null,
-        outPoint: null,
+        inPoint: range?.inPoint ?? null,
+        outPoint: range?.outPoint ?? null,
         markers: markerTimes.map(([time, label], i) => ({ id: `m${i}`, time, label, color: '#ffcc00' })),
       },
       videos: [{ id: 'tone', name: 'tone.wav', mimeType: 'audio/wav', data: makeToneWav(TONE_SECONDS).toString('base64') }],
@@ -62,7 +66,7 @@ function projectFile(markerTimes: Array<[number, string]>): Buffer {
   )
 }
 
-async function loadProject(page: Page, markerTimes: Array<[number, string]>) {
+async function loadProject(page: Page, markerTimes: Array<[number, string]>, range?: Range) {
   await page.addInitScript(() => {
     ;(window as unknown as { __copied: string | null }).__copied = null
     Clipboard.prototype.writeText = async (text: string) => {
@@ -74,7 +78,7 @@ async function loadProject(page: Page, markerTimes: Array<[number, string]>) {
   await page.locator('input[type="file"]').setInputFiles({
     name: 'chapters.veditor',
     mimeType: 'application/json',
-    buffer: projectFile(markerTimes),
+    buffer: projectFile(markerTimes, range),
   })
   await expect(page.getByRole('textbox', { name: 'Project name' })).toHaveValue('Chapters', { timeout: 30_000 })
   await expect(page.getByText('1 clip · 1 track')).toBeVisible({ timeout: 30_000 })
@@ -118,6 +122,25 @@ test.describe('ESCSUITE-472: markers as YouTube chapters in the export dialog', 
     expect(await page.evaluate(() => (window as unknown as { __copied: string }).__copied)).toBe(
       '0:00 Intro\n0:05 Setup'
     )
+  })
+
+  test('with in and out points the list follows the section, or the full video when picked', async ({ page }) => {
+    await loadProject(page, [[5, 'Before'], [40, 'In A'], [70, 'In B'], [110, 'After']], { inPoint: 30, outPoint: 100 })
+    await openExportDialog(page)
+
+    const row = page.getByRole('group', { name: 'Chapters' })
+    await expect(row.getByRole('radio', { name: /^Section/ })).toBeChecked()
+    await row.getByRole('button', { name: 'Copy chapters' }).click()
+    await expect(row.getByRole('status').filter({ hasText: 'Chapters copied' })).toHaveCount(1)
+    expect(await page.evaluate(() => (window as unknown as { __copied: string }).__copied)).toBe(
+      '0:00 Intro\n0:10 In A\n0:40 In B'
+    )
+
+    await row.getByRole('radio', { name: 'Full video' }).check()
+    await row.getByRole('button', { name: 'Copy chapters' }).click()
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { __copied: string }).__copied))
+      .toBe('0:00 Intro\n0:05 Before\n0:40 In A\n1:10 In B\n1:50 After')
   })
 
   test('without markers the Chapters row is left out', async ({ page }) => {

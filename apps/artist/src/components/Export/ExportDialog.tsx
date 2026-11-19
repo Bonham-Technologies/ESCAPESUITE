@@ -107,6 +107,7 @@ const CAPTION_MIME_TYPES: Record<CaptionFormat, string> = {
 /** The visible length notices the disabled downloads point at (ESCSUITE-385). */
 const LENGTH_REASON_ID = 'export-length-reason';
 const FULL_LENGTH_REASON_ID = 'export-full-length-reason';
+const CHAPTERS_EMPTY_ID = 'export-chapters-empty';
 
 /**
  * How to set a section, from the keys `useAppKeyboardShortcuts` binds: I and O
@@ -356,15 +357,25 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     const blob = new Blob([serializeCaptions(captionCues, format)], { type: CAPTION_MIME_TYPES[format] });
     downloadBlob(blob, `${projectName || 'export'}.${format}`);
   };
-  // ESCSUITE-472: the markers as YouTube chapters, relative to the selected
-  // section when there is one, else the whole timeline. Only when a marker
-  // falls in that range.
-  const chapters = useMemo(
-    () => buildYoutubeChapters(markers, timeRange ?? { start: 0, end: calculateTimelineDuration(clips) }),
-    [markers, timeRange, clips]
+  // ESCSUITE-472: the markers as YouTube chapters, timed from the start of the
+  // file the user exports. With a section selected the dialog exports either
+  // the section or the full video, so the row asks which: the section by
+  // default, and whichever the last export from this dialog wrote (set in
+  // `handleExport`). Without a section, the whole timeline. Shown when a
+  // marker falls in either range.
+  const [chaptersForFullVideo, setChaptersForFullVideo] = useState(false);
+  const fullChapters = useMemo(
+    () => buildYoutubeChapters(markers, { start: 0, end: calculateTimelineDuration(clips) }),
+    [markers, clips]
   );
+  const sectionChapters = useMemo(
+    () => (timeRange ? buildYoutubeChapters(markers, timeRange) : null),
+    [markers, timeRange]
+  );
+  const chapters = sectionChapters && !chaptersForFullVideo ? sectionChapters : fullChapters;
+  const showChaptersRow = fullChapters.chapters.length > 0 || (sectionChapters?.chapters.length ?? 0) > 0;
   const [chaptersCopy, setChaptersCopy] = useState<'copied' | 'failed' | null>(null);
-  useEffect(() => setChaptersCopy(null), [chapters.text]);
+  useEffect(() => setChaptersCopy(null), [chapters.text, isOpen]);
   const copyChapters = async () => {
     try {
       await navigator.clipboard.writeText(chapters.text);
@@ -492,6 +503,8 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
 
     // Determine options: primary button uses defaults, advanced button uses configured options
     const effectiveTimeRange = exportFullVideo ? undefined : timeRange;
+    // ESCSUITE-472: the Chapters row then times its list from this file's start.
+    setChaptersForFullVideo(exportFullVideo === true);
     const exportOptions: ExportOptions = useAdvanced
       ? { ...advancedOptions, timeRange: effectiveTimeRange }
       : { format: 'webm', quality: 'medium', resolution: 'project', timeRange: effectiveTimeRange };
@@ -1228,15 +1241,54 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
               )}
 
               {/* ESCSUITE-472: the markers as YouTube chapters. Only when a
-                  marker falls in the exported range. */}
-              {chapters.chapters.length > 0 && (
+                  marker falls in a range the dialog can export; with a
+                  section selected, the user picks which file the times are
+                  for. */}
+              {showChaptersRow && (
                 <div className={styles.section} role="group" aria-labelledby="export-chapters-label">
                   <span className={styles.label} id="export-chapters-label">Chapters</span>
+                  {timeRange && (
+                    <div className={styles.radioGroup} role="radiogroup" aria-label="Chapter times for">
+                      <label className={styles.radio}>
+                        <input
+                          type="radio"
+                          name="export-chapters-range"
+                          checked={!chaptersForFullVideo}
+                          onChange={() => setChaptersForFullVideo(false)}
+                        />
+                        <span>Section ({formatTime(timeRange.start)} - {formatTime(timeRange.end)})</span>
+                      </label>
+                      <label className={styles.radio}>
+                        <input
+                          type="radio"
+                          name="export-chapters-range"
+                          checked={chaptersForFullVideo}
+                          onChange={() => setChaptersForFullVideo(true)}
+                        />
+                        <span>Full video</span>
+                      </label>
+                    </div>
+                  )}
+                  {chapters.chapters.length === 0 && (
+                    <div className={styles.summary} id={CHAPTERS_EMPTY_ID}>
+                      {chaptersForFullVideo ? 'No markers in the video.' : 'No markers in the section.'}
+                    </div>
+                  )}
                   <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
-                    <button className={styles.cancelButton} onClick={copyChapters}>
+                    <button
+                      className={styles.cancelButton}
+                      onClick={copyChapters}
+                      disabled={chapters.chapters.length === 0}
+                      aria-describedby={chapters.chapters.length === 0 ? CHAPTERS_EMPTY_ID : undefined}
+                    >
                       Copy chapters
                     </button>
-                    <button className={styles.cancelButton} onClick={downloadChapters}>
+                    <button
+                      className={styles.cancelButton}
+                      onClick={downloadChapters}
+                      disabled={chapters.chapters.length === 0}
+                      aria-describedby={chapters.chapters.length === 0 ? CHAPTERS_EMPTY_ID : undefined}
+                    >
                       Download chapters .txt
                     </button>
                   </div>
