@@ -17,6 +17,41 @@ Nine jobs, with `ci-status` as the single required check. The benchmarks live in
 | `deploy` | Vercel deployment | After E2E passes (skipped for Dependabot: its PRs get no secrets) |
 | `ci-status` | Summary/gate job | All PRs |
 
+**A skipped `ci-status` would pass the ruleset** (ESCSUITE-477). `main`'s ruleset requires a check
+run named `ci-status` (strict), and GitHub counts a skipped check run as passing. `ci.yml` also
+triggers on `pull_request_target`, only so the changesets "Version Packages" PR (opened with
+`GITHUB_TOKEN`, so `pull_request` never fires for it) gets CI. On that event every job, `ci-status`
+included, is skipped unless the actor is `github-actions[bot]` and the head is in this repository
+(ESCSUITE-122), and a skipped job still reports a check run. Until ESCSUITE-477 that check run was
+named `ci-status`, so on every other PR the gate was met seconds after a push, before the real
+`pull_request` run reached `ci-status`; auto-merge merged Dependabot #1102 and #1104 that way while
+their CI was still running.
+
+- **The fix.** The `ci-status` job has a `name:` expression that mirrors its `if:`: it is
+  `ci-status` when the job runs (push, `pull_request`, and the bot's `pull_request_target`) and
+  something else otherwise. GitHub does not evaluate a skipped job's name expression; the check
+  run carries the expression's raw text (probed on 2026-11-17 with a throwaway workflow: a skipped
+  job reported `github.event_name == 'pull_request_target' && 'probe-real' || 'probe-skipped-if'`,
+  while a running one reported its evaluated name). Either way the skipped check run is not named
+  `ci-status`, so while the real run is in progress the required check is missing ("Expected")
+  and blocks the merge. The job's key, its `if:`, its `needs:` and every check in its script are
+  unchanged. The other jobs still report skipped check runs on `pull_request_target`
+  (`lint-and-typecheck`, `test`, …); none is required.
+- **How to see it on a PR.** The head commit's checks list one `ci-status`, from the
+  `pull_request` run (pending until the jobs it needs finish), plus a skipped check with the long
+  expression as its name. `gh api repos/{owner}/{repo}/commits/<sha>/check-runs?check_name=ci-status
+  --jq '.check_runs[].conclusion'` must never print `skipped`.
+- **Rejected alternatives.** Moving the `pull_request_target` path into its own workflow does not
+  help by itself: the workflow starts for every PR (the trigger cannot filter by actor or head
+  branch), and its skipped jobs report check runs under the same names. A reusable workflow
+  (`workflow_call`) called from two thin entry workflows renames every check to
+  `<caller job> / ci-status`, so the ruleset would need changing in step. Both duplicate or move
+  ~800 lines; the name expression is one line.
+- **Guarded by** `scripts/ci-status-required-check.test.mjs` (`pnpm test:scripts`): no job in any
+  workflow may report a skipped check run named `ci-status`, and evaluating `ci-status`'s `if:` and
+  name for push, `pull_request` and `pull_request_target` (owner, Dependabot, fork, the bot) must
+  give `ci-status` exactly when the job runs. If you change the `if:`, change the name to match.
+
 The `pnpm perf` benchmarks run from `.github/workflows/perf.yml` instead: pushes to `main`/`dev`, PRs labelled `perf`, and `workflow_dispatch`; informational only, never gates, skipped for Dependabot.
 
 The nightly (`.github/workflows/nightly.yml`, ESCSUITE-353) is a third workflow, also outside `ci-status`:
