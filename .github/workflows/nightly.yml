@@ -40,13 +40,13 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
@@ -87,7 +87,7 @@ jobs:
       # holds Chromium alone, and a hit on that one would leave the other two missing.
       - name: Cache Playwright browsers
         if: ${{ !cancelled() }}
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
@@ -203,7 +203,7 @@ jobs:
           PROPERTY_OUTCOME: ${{ steps.property.outcome }}
 
       - name: Upload Playwright Report
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: nightly-playwright-report
@@ -211,7 +211,7 @@ jobs:
           retention-days: 30
 
       - name: Upload flaky test list
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: nightly-e2e-flaky
@@ -220,7 +220,7 @@ jobs:
           retention-days: 30
 
       - name: Upload Test Results
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
           name: nightly-test-results
