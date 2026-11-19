@@ -4,6 +4,13 @@ Both tools detect embedding with `isEmbedded()` (`packages/shared/src/config`) â
 `window.parent !== window` â€” and talk to the host over `postMessage`. The full protocol lives in
 the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
 
+**Offline worker (ESCSUITE-469).** The hosted deployment's service worker is registered only by a
+top-level page: an embedded app registers nothing and never shows the "Updated" note, so a host
+sees no change. If a top-level visit already registered it, an embedded frame's page load is still
+answered by it, from the network first (the cached copy only when the network fails), and no
+message, URL parameter or `postMessage` is touched. See `vercel-deployment.md`, "Offline after
+the first visit".
+
 - **PostMessage**: bidirectional communication with the parent window. ARTIST posts `READY` on
   init, and `EXPORT_COMPLETE` with
   `{ blob: Blob, format: 'mp4' | 'webm' | 'gif', name: string, audio?: boolean }`

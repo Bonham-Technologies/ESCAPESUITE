@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { readdirSync, existsSync } from 'node:fs'
+import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -52,5 +52,30 @@ test.describe('standalone dist/ is exactly one file (ESCSUITE-153)', () => {
 
   test('ESCAPECRAFT', () => {
     assertSingleFileDist('ESCAPECRAFT', resolve(__dirname, '../../../craft/dist'))
+  })
+})
+
+/**
+ * ESCSUITE-469: the hosted deployment's service worker, web manifest and
+ * their registration are written by `scripts/offline.mjs` into the combined
+ * `dist/` only. The offline file runs from `file://`, where a service worker
+ * cannot exist and a manifest link would be a request for a file that is not
+ * there, so neither may ever reach the standalone HTML.
+ */
+function assertNoOfflineRegistration(appLabel: string, distDir: string) {
+  const html = readFileSync(resolve(distDir, 'index.html'), 'utf8')
+  // No bundled library mentions the API either, so any mention is a registration.
+  expect(html, `${appLabel}'s standalone HTML registers a service worker`).not.toContain('serviceWorker')
+  expect(html, `${appLabel}'s standalone HTML links a web manifest`).not.toMatch(/rel=["']?manifest/)
+  expect(html).not.toContain('escapesuite-offline')
+}
+
+test.describe('standalone HTML has no service worker registration (ESCSUITE-469)', () => {
+  test('ESCAPEARTIST', () => {
+    assertNoOfflineRegistration('ESCAPEARTIST', resolve(__dirname, '../../../artist/dist'))
+  })
+
+  test('ESCAPECRAFT', () => {
+    assertNoOfflineRegistration('ESCAPECRAFT', resolve(__dirname, '../../../craft/dist'))
   })
 })
