@@ -47,6 +47,7 @@ import { analytics } from '../../utils/analytics';
 import { sendMessage } from '../../utils/integration';
 import { downloadBlob } from '../../utils/downloadBlob';
 import { serializeCaptions } from '../../core/captions';
+import { buildYoutubeChapters } from '../../utils/youtubeChapters';
 import type { CaptionCue, CaptionFormat } from '../../core/captions';
 import type { ExportOptions, ExportProgress } from '../../store/types';
 import { formatTime, formatFileSize } from '../../utils/timeUtils';
@@ -106,6 +107,7 @@ const CAPTION_MIME_TYPES: Record<CaptionFormat, string> = {
 /** The visible length notices the disabled downloads point at (ESCSUITE-385). */
 const LENGTH_REASON_ID = 'export-length-reason';
 const FULL_LENGTH_REASON_ID = 'export-full-length-reason';
+const CHAPTERS_EMPTY_ID = 'export-chapters-empty';
 
 /**
  * How to set a section, from the keys `useAppKeyboardShortcuts` binds: I and O
@@ -143,6 +145,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   const projectResolution = useEditorStore((state) => state.project.resolution);
   const inPoint = useEditorStore((state) => state.inPoint);
   const outPoint = useEditorStore((state) => state.outPoint);
+  const markers = useEditorStore((state) => state.markers);
 
   // Use prop timeRange if provided, otherwise derive from in/out points.
   // Memoised so handleExport, which lists it as a dependency, is not rebuilt
@@ -354,6 +357,37 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     const blob = new Blob([serializeCaptions(captionCues, format)], { type: CAPTION_MIME_TYPES[format] });
     downloadBlob(blob, `${projectName || 'export'}.${format}`);
   };
+  // ESCSUITE-472: the markers as YouTube chapters, timed from the start of the
+  // file the user exports. With a section selected the dialog exports either
+  // the section or the full video, so the row asks which: the section by
+  // default, and whichever the last export from this dialog wrote (set in
+  // `handleExport`). Without a section, the whole timeline. Shown when a
+  // marker falls in either range.
+  const [chaptersForFullVideo, setChaptersForFullVideo] = useState(false);
+  const fullChapters = useMemo(
+    () => buildYoutubeChapters(markers, { start: 0, end: calculateTimelineDuration(clips) }),
+    [markers, clips]
+  );
+  const sectionChapters = useMemo(
+    () => (timeRange ? buildYoutubeChapters(markers, timeRange) : null),
+    [markers, timeRange]
+  );
+  const chapters = sectionChapters && !chaptersForFullVideo ? sectionChapters : fullChapters;
+  const showChaptersRow = fullChapters.chapters.length > 0 || (sectionChapters?.chapters.length ?? 0) > 0;
+  const [chaptersCopy, setChaptersCopy] = useState<'copied' | 'failed' | null>(null);
+  useEffect(() => setChaptersCopy(null), [chapters.text, isOpen]);
+  const copyChapters = async () => {
+    try {
+      await navigator.clipboard.writeText(chapters.text);
+      setChaptersCopy('copied');
+    } catch {
+      setChaptersCopy('failed');
+    }
+  };
+  const downloadChapters = () => {
+    downloadBlob(new Blob([chapters.text + '\n'], { type: 'text/plain' }), `${projectName || 'export'}-chapters.txt`);
+  };
+
   // What the whole timeline exports as, and what the click exports: the
   // section when one is selected. Only the stretch encoded is held to the
   // three-hour limit (ESCSUITE-367), so a section of a longer timeline exports.
@@ -469,6 +503,8 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
 
     // Determine options: primary button uses defaults, advanced button uses configured options
     const effectiveTimeRange = exportFullVideo ? undefined : timeRange;
+    // ESCSUITE-472: the Chapters row then times its list from this file's start.
+    setChaptersForFullVideo(exportFullVideo === true);
     const exportOptions: ExportOptions = useAdvanced
       ? { ...advancedOptions, timeRange: effectiveTimeRange }
       : { format: 'webm', quality: 'medium', resolution: 'project', timeRange: effectiveTimeRange };
@@ -1201,6 +1237,74 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                       Download .vtt
                     </button>
                   </div>
+                </div>
+              )}
+
+              {/* ESCSUITE-472: the markers as YouTube chapters. Only when a
+                  marker falls in a range the dialog can export; with a
+                  section selected, the user picks which file the times are
+                  for. */}
+              {showChaptersRow && (
+                <div className={styles.section} role="group" aria-labelledby="export-chapters-label">
+                  <span className={styles.label} id="export-chapters-label">Chapters</span>
+                  {timeRange && (
+                    <div className={styles.radioGroup} role="radiogroup" aria-label="Chapter times for">
+                      <label className={styles.radio}>
+                        <input
+                          type="radio"
+                          name="export-chapters-range"
+                          checked={!chaptersForFullVideo}
+                          onChange={() => setChaptersForFullVideo(false)}
+                        />
+                        <span>Section ({formatTime(timeRange.start)} - {formatTime(timeRange.end)})</span>
+                      </label>
+                      <label className={styles.radio}>
+                        <input
+                          type="radio"
+                          name="export-chapters-range"
+                          checked={chaptersForFullVideo}
+                          onChange={() => setChaptersForFullVideo(true)}
+                        />
+                        <span>Full video</span>
+                      </label>
+                    </div>
+                  )}
+                  {chapters.chapters.length === 0 && (
+                    <div className={styles.summary} id={CHAPTERS_EMPTY_ID}>
+                      {chaptersForFullVideo ? 'No markers in the video.' : 'No markers in the section.'}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
+                    <button
+                      className={styles.cancelButton}
+                      onClick={copyChapters}
+                      disabled={chapters.chapters.length === 0}
+                      aria-describedby={chapters.chapters.length === 0 ? CHAPTERS_EMPTY_ID : undefined}
+                    >
+                      Copy chapters
+                    </button>
+                    <button
+                      className={styles.cancelButton}
+                      onClick={downloadChapters}
+                      disabled={chapters.chapters.length === 0}
+                      aria-describedby={chapters.chapters.length === 0 ? CHAPTERS_EMPTY_ID : undefined}
+                    >
+                      Download chapters .txt
+                    </button>
+                  </div>
+                  <span className={styles.srOnly} role="status" aria-live="polite" aria-atomic="true">
+                    {chaptersCopy === 'copied' ? 'Chapters copied' : chaptersCopy === 'failed' ? 'Could not copy chapters' : ''}
+                  </span>
+                  {chaptersCopy && (
+                    <div className={styles.summary} aria-hidden="true">
+                      {chaptersCopy === 'copied' ? 'Copied' : 'Could not copy: use Download chapters .txt'}
+                    </div>
+                  )}
+                  {chapters.warnings.map((warning) => (
+                    <div className={styles.summary} role="status" key={warning}>
+                      {warning}
+                    </div>
+                  ))}
                 </div>
               )}
             </>

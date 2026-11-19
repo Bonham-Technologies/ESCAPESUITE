@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- ESCAPEARTIST: the export dialog has a Chapters row that copies the timeline's markers as a YouTube chapter list, or saves it as a .txt, and warns when YouTube would not accept the list (ESCSUITE-472).
 - Tests: the on-device transcription regression spec no longer counts WebKit's in-memory read of a clip just added to the timeline (a `blob:` URL, which never reaches the network) as a request made while transcribing, so it stops failing on a slow first attempt (ESCSUITE-481).
 - Tests: a regression spec opens Remove silences on an imported clip, changes the threshold and minimum gap, cancels and reopens it, and checks the fields read the defaults beside the pause the defaults find, in Chromium, Firefox and WebKit (ESCSUITE-480).
 - ESCAPECRAFT: Delete in the recordings list asks first, naming the recording and, for a take recorded as several files, saying how many go; Cancel and Escape keep it (ESCSUITE-483).
