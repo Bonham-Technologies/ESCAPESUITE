@@ -225,6 +225,7 @@ export function ClipEditor() {
           open/closed state changes meaning (CollapsibleSection). */}
       {(isVideo || isAudio) && (
         <SpeedSection
+          clipId={selectedClip.id}
           speed={clipSpeed(selectedClip)}
           onSpeedChange={handleSpeedChange}
           linked={isLinked}

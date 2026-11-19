@@ -12,6 +12,8 @@ import { useCommittedNumberInput } from './useCommittedNumberInput';
 import styles from './ClipEditor.module.css';
 
 interface SpeedSectionProps {
+  /** The selected clip: a refusal shown for one clip is not shown for the next. */
+  clipId: string;
   /** The clip's speed: 1 when it has none. */
   speed: number;
   /**
@@ -34,12 +36,21 @@ interface SpeedSectionProps {
  * — pitched with the picture up to 2×, silent above — and, when the store
  * refuses a change, why.
  */
-export function SpeedSection({ speed, onSpeedChange, linked, hasPicture, disabled }: SpeedSectionProps) {
+export function SpeedSection({ clipId, speed, onSpeedChange, linked, hasPicture, disabled }: SpeedSectionProps) {
   const id = useId();
-  // Why the last change was refused; cleared by the next one that lands.
-  const [refused, setRefused] = useState(false);
+  // The clip whose last change was refused; cleared by the next one that
+  // lands. Keyed by clip so the line doesn't follow the selection to another
+  // clip (the inspector isn't remounted per clip).
+  const [refusedFor, setRefusedFor] = useState<string | null>(null);
+  const refused = refusedFor === clipId;
   const apply = (next: number) => {
-    setRefused(!onSpeedChange(next));
+    // The speed it already has: nothing to change, and nothing to explain
+    // (the store refuses it, but not for the reason the line gives).
+    if (next === speed) {
+      setRefusedFor(null);
+      return;
+    }
+    setRefusedFor(onSpeedChange(next) ? null : clipId);
   };
   const field = useCommittedNumberInput({
     value: speed,
