@@ -49,6 +49,8 @@ export function ClipEditor() {
     handleCropChange,
     cropOnCanvas,
     handleCropOnCanvasToggle,
+    zoomToRegionOpen,
+    handleZoomToRegionToggle,
     handleBlurChange,
     handleTransitionTypeChange,
     handleTransitionDurationChange,
@@ -244,6 +246,10 @@ export function ClipEditor() {
         onSplit={handleSplitAtPlayhead}
         onUnlink={handleUnlinkClip}
         onFindSilences={handleFindSilences}
+        // A video clip only (ESCSUITE-475): an image has no motion to zoom
+        // through, and an overlay or audio clip has no picture to zoom into.
+        onZoomToRegion={isVideo && sourceVideo ? handleZoomToRegionToggle : undefined}
+        zoomToRegionOpen={zoomToRegionOpen}
         disabled={trackLocked}
       />
     </div>

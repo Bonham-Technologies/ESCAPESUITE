@@ -67,6 +67,7 @@ one and list it here). Don't add narrative, ticket history or measurements to th
 | On-device transcription (`src/core/transcribe.ts`, `src/core/speechRecognitionLocal.ts`, ESCSUITE-404) | [`on-device-transcription.md`](docs/reference/on-device-transcription.md) |
 | Keyframe Animation System (`src/utils/animation.ts`) | [`keyframe-animation-system.md`](docs/reference/keyframe-animation-system.md) |
 | Keyframe Panel (`src/components/KeyframePanel/`) | [`keyframe-panel.md`](docs/reference/keyframe-panel.md) |
+| Zoom to region (`src/utils/zoomToRegion.ts`, `src/components/Preview/ZoomRegion.tsx`, ESCSUITE-475) | [`zoom-to-region.md`](docs/reference/zoom-to-region.md) |
 | Preview (`src/components/Preview/`) | [`preview.md`](docs/reference/preview.md) |
 | Timeline (`src/components/Timeline/`) | [`timeline.md`](docs/reference/timeline.md) |
 | ClipEditor (`src/components/ClipEditor/`) | [`clipeditor.md`](docs/reference/clipeditor.md) |

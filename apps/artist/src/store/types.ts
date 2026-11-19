@@ -678,6 +678,14 @@ export interface EditorState {
    */
   cropClipId: string | null;
   /**
+   * The clip the preview's **Zoom to region** tool is open on (ESCSUITE-475),
+   * or null. A latch exactly like `cropClipId`: the tool shows only while it
+   * names the selected clip (`components/Preview/zoomRegionTarget.ts`'s
+   * `zoomRegionTarget`), so a selection change leaves it with nothing to clear.
+   * View state — not in the project, the undo history or a saved file.
+   */
+  zoomRegionClipId: string | null;
+  /**
    * The "Remove silences" review (ESCSUITE-403), or null while closed: the
    * clip it was opened on and the cuts still on the list, in timeline
    * seconds, which the timeline draws as bands. View state, like `cropClipId`:
@@ -1006,6 +1014,7 @@ export interface EditorState {
   setLoopPlayback: (enabled: boolean) => void;
   setLoopSuspended: (suspended: boolean) => void;
   setCropClipId: (clipId: string | null) => void;
+  setZoomRegionClipId: (clipId: string | null) => void;
   /** Open the "Remove silences" review on a clip (no cuts listed yet), or close it with null. */
   setSilenceReviewClip: (clipId: string | null) => void;
   /** Replace the review's list of cuts. Does nothing while the review is closed. */

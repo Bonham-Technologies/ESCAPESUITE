@@ -169,6 +169,13 @@ export interface ClipEditorActions {
   /** The "Crop on canvas" button's handler. Only valid while a clip is selected — it reads
    * `selectedClip.id` unguarded, the same as `handleResetToDefaults` below. */
   handleCropOnCanvasToggle: () => void;
+  /** Whether the preview's Zoom to region tool is open on the selected clip (ESCSUITE-475). */
+  zoomToRegionOpen: boolean;
+  /**
+   * The "Zoom to region" button's handler: opens the tool on the selected clip
+   * (closing crop mode, whose handles would sit in the same place), or closes it.
+   */
+  handleZoomToRegionToggle: () => void;
   handleBlurChange: (blur: number) => void;
   handleTransitionTypeChange: (type: TransitionType) => void;
   handleTransitionDurationChange: (duration: number) => void;
@@ -255,6 +262,9 @@ export function useClipEditorActions(): ClipEditorActions {
   // and `ClipEditor.rerender.test.tsx`.
   const cropClipId = useEditorStore((state) => state.cropClipId);
   const setCropClipId = useEditorStore((state) => state.setCropClipId);
+  // Zoom to region's latch (ESCSUITE-475): a scalar, like `cropClipId`.
+  const zoomRegionClipId = useEditorStore((state) => state.zoomRegionClipId);
+  const setZoomRegionClipId = useEditorStore((state) => state.setZoomRegionClipId);
 
   const sourceVideo = useMemo(() => {
     if (!selectedClip) return null;
@@ -464,8 +474,22 @@ export function useClipEditorActions(): ClipEditorActions {
   // clip, so the guard would be an operand no caller can reach. Deleted rather
   // than tested, per the ESCSUITE-110/118 precedent for exactly that situation.
   const handleCropOnCanvasToggle = useCallback(() => {
+    // Opening crop mode closes Zoom to region (ESCSUITE-475), as opening that
+    // closes crop mode below: the two never share the preview.
+    if (!cropOnCanvas) setZoomRegionClipId(null);
     setCropClipId(cropOnCanvas ? null : selectedClip!.id);
-  }, [selectedClip, cropOnCanvas, setCropClipId]);
+  }, [selectedClip, cropOnCanvas, setCropClipId, setZoomRegionClipId]);
+
+  const zoomToRegionOpen = selectedClip != null && zoomRegionClipId === selectedClip.id;
+  // No `!selectedClip` guard, for the reason `handleCropOnCanvasToggle` gives.
+  const handleZoomToRegionToggle = useCallback(() => {
+    if (zoomToRegionOpen) {
+      setZoomRegionClipId(null);
+      return;
+    }
+    setCropClipId(null);
+    setZoomRegionClipId(selectedClip!.id);
+  }, [selectedClip, zoomToRegionOpen, setCropClipId, setZoomRegionClipId]);
 
   const handleBlurChange = useCallback(
     (blur: number) => {
@@ -708,6 +732,8 @@ export function useClipEditorActions(): ClipEditorActions {
     handleCropChange,
     cropOnCanvas,
     handleCropOnCanvasToggle,
+    zoomToRegionOpen,
+    handleZoomToRegionToggle,
     handleBlurChange,
     handleTransitionTypeChange,
     handleTransitionDurationChange,

@@ -15,6 +15,9 @@ import { getActiveTransition } from './transitions';
 import * as cropOverlay from './cropOverlay';
 import { videoForSlot } from '../../core/elementSlots';
 import { CropHandles } from './CropHandles';
+import { zoomRegionTarget } from './zoomRegionTarget';
+import { ZoomRegionForm, ZoomRegionPicker } from './ZoomRegion';
+import { useZoomRegion } from './useZoomRegion';
 import { isTrackLocked } from '../../store/trackLock';
 import { usePreviewMedia } from './usePreviewMedia';
 import { usePreviewRenderLoop } from './usePreviewRenderLoop';
@@ -75,6 +78,8 @@ export function PreviewPlayer() {
   const updateTextOverlayData = useEditorStore((state) => state.updateTextOverlayData);
   const cropClipId = useEditorStore((state) => state.cropClipId);
   const setCropClipId = useEditorStore((state) => state.setCropClipId);
+  const zoomRegionClipId = useEditorStore((state) => state.zoomRegionClipId);
+  const setZoomRegionClipId = useEditorStore((state) => state.setZoomRegionClipId);
 
   // Keyframe mode: when keyframe panel is open, manipulations create keyframes
   const keyframePanelOpen = useEditorStore((state) => state.keyframePanelState.isOpen);
@@ -149,6 +154,16 @@ export function PreviewPlayer() {
     () => cropOverlay.visibleCropTarget(cropScene, currentTime),
     [cropScene, currentTime]
   );
+
+  // Zoom to region (ESCSUITE-475): a latch read the way crop mode's is, and
+  // never open at the same time as crop mode, whose handles would sit in the
+  // same place. The box is fitted at the playhead on every render.
+  const zoomTarget = useMemo(
+    () => (cropping ? null : zoomRegionTarget({ clips, sourceVideos, tracks, zoomRegionClipId, selectedClipId })),
+    [cropping, clips, sourceVideos, tracks, zoomRegionClipId, selectedClipId]
+  );
+  const zoomRegion = useZoomRegion(zoomTarget, canvasDimensions, currentTime);
+  const pointerOff = Boolean(editingTextClipId || cropping || zoomTarget);
 
   /**
    * The decoded element a source draws from, for the crop chrome's dim pass —
@@ -305,6 +320,9 @@ export function PreviewPlayer() {
       );
       return;
     }
+    // The Zoom to region box replaces it too (ESCSUITE-475), for the same
+    // reason: the canvas' pointer handling is off while the tool is open.
+    if (zoomTarget) return;
 
     selectionOverlay.drawSelectionHandles(canvas, time, {
       clips,
@@ -316,7 +334,7 @@ export function PreviewPlayer() {
       transition: getActiveTransition(clips, tracks, time),
     }, canvasDimensions, handleScreenScale(canvas));
   }, [canvasDimensions, clips, tracks, sourceVideos, selectedClipId, isPlaying, keyframePanelOpen,
-      handleScreenScale, cropping, cropScene, cropElementFor]);
+      handleScreenScale, cropping, cropScene, cropElementFor, zoomTarget]);
 
   // Draw lightweight bounding boxes for multi-selected overlay clips (no resize handles)
   const drawMultiSelectHandles = useCallback((time: number) => {
@@ -458,10 +476,10 @@ export function PreviewPlayer() {
             width={canvasDimensions.width}
             height={canvasDimensions.height}
             style={{ cursor }}
-            onMouseDown={editingTextClipId || cropping ? undefined : handleMouseDown}
-            onMouseMove={editingTextClipId || cropping ? undefined : handleMouseMoveForCursor}
-            onMouseUp={editingTextClipId || cropping ? undefined : handleMouseUp}
-            onMouseLeave={editingTextClipId || cropping ? undefined : handleMouseLeave}
+            onMouseDown={pointerOff ? undefined : handleMouseDown}
+            onMouseMove={pointerOff ? undefined : handleMouseMoveForCursor}
+            onMouseUp={pointerOff ? undefined : handleMouseUp}
+            onMouseLeave={pointerOff ? undefined : handleMouseLeave}
             onDoubleClick={handleDoubleClick}
           />
         )}
@@ -497,7 +515,27 @@ export function PreviewPlayer() {
             onLeave={() => setCropClipId(null)}
           />
         )}
+        {zoomTarget && !isPlaying && canvasEl && (
+          <ZoomRegionPicker
+            canvas={canvasEl}
+            projectSize={canvasDimensions}
+            region={zoomRegion.region}
+            onRegionChange={zoomRegion.request}
+          />
+        )}
       </div>
+
+      {zoomTarget && (
+        <ZoomRegionForm
+          key={zoomTarget.clip.id}
+          target={zoomTarget}
+          projectSize={canvasDimensions}
+          region={zoomRegion.region}
+          onRegionChange={zoomRegion.request}
+          locked={isTrackLocked(tracks, zoomTarget.clip.trackId)}
+          onLeave={() => setZoomRegionClipId(null)}
+        />
+      )}
 
       <div className={styles.info}>
         <PreviewTimecode
