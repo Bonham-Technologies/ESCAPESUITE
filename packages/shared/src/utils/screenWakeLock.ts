@@ -28,6 +28,10 @@ export function holdScreenAwake(options: HoldScreenAwakeOptions = {}): ScreenAwa
   const { signal, onChange } = options;
   let released = false;
   let pending = false;
+  // The page came back while a request was in flight: ask again once it settles
+  // if it did not leave us holding a lock (the browser refuses or drops a lock
+  // requested just as the page was hidden).
+  let retry = false;
   let sentinel: WakeLockSentinel | null = null;
   let reported = false;
 
@@ -57,7 +61,17 @@ export function holdScreenAwake(options: HoldScreenAwakeOptions = {}): ScreenAwa
     report(false);
   }
 
-  const acquire = () => {
+  const settle = () => {
+    pending = false;
+    if (retry) {
+      retry = false;
+      acquire();
+    }
+  };
+
+  function acquire() {
+    // A lock the browser already gave up whose release event has not reached us yet.
+    if (sentinel?.released) onSentinelReleased();
     if (released || pending || sentinel) return;
     // A hidden page is refused; the visibilitychange listener asks again on return.
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
@@ -72,24 +86,31 @@ export function holdScreenAwake(options: HoldScreenAwakeOptions = {}): ScreenAwa
     pending = true;
     request.then(
       (granted) => {
-        pending = false;
         if (released) {
+          pending = false;
           // The job ended while the request was in flight: do not leak the lock.
           dropSentinel(granted);
           return;
         }
+        // Granted, then dropped by the browser (the page was hidden) before we saw it.
+        if (granted.released) {
+          settle();
+          return;
+        }
+        pending = false;
+        retry = false;
         sentinel = granted;
         granted.addEventListener('release', onSentinelReleased);
         report(true);
       },
-      () => {
-        pending = false;
-      },
+      settle,
     );
-  };
+  }
 
   const onVisibility = () => {
-    if (document.visibilityState === 'visible') acquire();
+    if (document.visibilityState !== 'visible') return;
+    if (pending) retry = true;
+    else acquire();
   };
 
   const release = () => {

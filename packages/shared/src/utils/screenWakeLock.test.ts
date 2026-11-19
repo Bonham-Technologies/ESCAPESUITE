@@ -130,6 +130,64 @@ describe('holdScreenAwake', () => {
     expect(sentinels[1].release).toHaveBeenCalledTimes(1);
   });
 
+  it('asks again when the page comes back while a refused request was in flight', async () => {
+    let reject!: (e: unknown) => void;
+    request.mockImplementationOnce(() => new Promise((_, r) => { reject = r; }));
+    const onChange = vi.fn();
+    const hold = holdScreenAwake({ onChange });
+    // Hidden and shown again before the browser answers; it then refuses.
+    setVisibility('hidden');
+    setVisibility('visible');
+    expect(request).toHaveBeenCalledTimes(1);
+    reject(new DOMException('hidden', 'NotAllowedError'));
+    await flush();
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(onChange).toHaveBeenLastCalledWith(true);
+    hold.release();
+    expect(sentinels[0].release).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not count a lock the browser dropped before the request settled', async () => {
+    let resolve!: (s: FakeSentinel) => void;
+    request.mockImplementationOnce(() => new Promise((r) => { resolve = r; }));
+    const onChange = vi.fn();
+    const hold = holdScreenAwake({ onChange });
+    setVisibility('hidden');
+    const dropped = new FakeSentinel();
+    await dropped.release();
+    setVisibility('visible');
+    resolve(dropped);
+    await flush();
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(onChange).toHaveBeenCalledExactlyOnceWith(true);
+    hold.release();
+    expect(sentinels[0].release).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks again on return even if the release event has not arrived yet', async () => {
+    const hold = holdScreenAwake();
+    await flush();
+    // The browser marked the lock released but its event is still queued.
+    sentinels[0].released = true;
+    setVisibility('visible');
+    await flush();
+    expect(request).toHaveBeenCalledTimes(2);
+    hold.release();
+    expect(sentinels[1].release).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks for nothing more when released while a request was in flight and the page came back', async () => {
+    let reject!: (e: unknown) => void;
+    request.mockImplementationOnce(() => new Promise((_, r) => { reject = r; }));
+    const hold = holdScreenAwake();
+    setVisibility('hidden');
+    setVisibility('visible');
+    hold.release();
+    reject(new DOMException('hidden', 'NotAllowedError'));
+    await flush();
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
   it('does not request while the page is hidden, and does once it shows', async () => {
     setVisibility('hidden');
     const hold = holdScreenAwake();

@@ -69,7 +69,8 @@
   for a `screen` lock and returns `{ release() }`. Best effort: a missing API, a refused or
   throwing request, or a hidden page at call time does nothing and never throws. The browser drops
   the lock whenever the page is hidden, so the hold requests again on `visibilitychange` to
-  visible while it is not released. `release()` is idempotent, removes the listeners, and a lock
+  visible while it is not released; a request still in flight when the page comes back is
+  asked again once it settles without a live lock. `release()` is idempotent, removes the listeners, and a lock
   whose request resolves after `release()` is released at once, so none outlives its job. `signal`
   releases on abort (a cancelled job); `onChange(held)` reports only a lock actually held, which is
   what the export dialog's status line reads. Users: ARTIST export and transcription, CRAFT while

@@ -469,13 +469,6 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     // The ErrorBoundary unmounts this dialog without reaching handleCancel,
     // and `main.tsx`'s onError aborts whatever is registered here.
     registerLiveExport(abortController);
-    // Keep the screen on for the whole run (ESCSUITE-474). Cancel aborts the
-    // controller, which releases the lock at once; the `finally` below covers
-    // success and failure. Best effort: no API or a refusal changes nothing.
-    const awake = holdScreenAwake({
-      signal: abortController.signal,
-      onChange: (held) => setAwakeRun((prev) => (held ? abortController : prev === abortController ? null : prev)),
-    });
     const isCurrentRun = () => latestExportRef.current === abortController;
 
     // Determine options: primary button uses defaults, advanced button uses configured options
@@ -521,6 +514,16 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     // keeps the closure it started with, so `progress` here would still be
     // the value from before the run began, never where the run failed.
     let lastProgress = 0;
+
+    // Keep the screen on for the whole run (ESCSUITE-474). Cancel aborts the
+    // controller, which releases the lock at once; the `finally` below covers
+    // success and failure. Taken right before the `try`, so nothing can throw
+    // between it and that `finally`. Best effort: no API or a refusal changes
+    // nothing.
+    const awake = holdScreenAwake({
+      signal: abortController.signal,
+      onChange: (held) => setAwakeRun((prev) => (held ? abortController : prev === abortController ? null : prev)),
+    });
 
     try {
       const onProgress = (p: ExportProgress) => {
