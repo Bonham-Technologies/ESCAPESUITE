@@ -9,7 +9,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 import { useProjectActions, type ProjectActionsDeps } from './useProjectActions'
 import * as confirmModule from './confirmAction'
-import { loadProject, saveProject, showOpenProjectDialog } from '../core/projectManager'
+import { loadProject, saveProject, saveProjectToFile, showOpenProjectDialog } from '../core/projectManager'
+import { rememberFileHandle } from '../core/saveFile'
+import { domError, fakeFileHandle, installSavePicker } from '../test/doubles/fileHandle'
 import { ProjectFileError } from '../core/projectFileFormat'
 import { analytics } from '../utils/analytics'
 import { revokeSourceThumbnails } from '../core/storage'
@@ -812,3 +814,203 @@ describe('the editor block (ESCSUITE-245)', () => {
   })
 })
 
+
+// ESCSUITE-470: where the browser has the save picker, Save writes over the
+// file the project came from (or the first save picked) instead of
+// downloading another copy.
+describe('saving to a file (ESCSUITE-470)', () => {
+  const editor = { inPoint: null, outPoint: null, markers: [] }
+  let uninstall: () => void
+  let picked: ReturnType<typeof fakeFileHandle>
+  const picker = () => (window as unknown as { showSaveFilePicker: ReturnType<typeof vi.fn> }).showSaveFilePicker
+
+  beforeEach(() => {
+    vi.mocked(saveProjectToFile).mockResolvedValue(undefined)
+    vi.mocked(loadProject).mockResolvedValue({ project: { ...deps.project, name: 'Opened' }, sourceVideos: [] })
+    picked = fakeFileHandle('Untitled Project.veditor')
+    uninstall = installSavePicker(async () => picked.handle)
+  })
+  afterEach(() => uninstall())
+
+  const save = async (result: { current: ReturnType<typeof useProjectActions> }, as = false) => {
+    await act(async () => {
+      await (as ? result.current.handleSaveProjectAs() : result.current.handleSaveProject())
+    })
+  }
+
+  /** Open `file` through the open picker, as `handle`, on an empty timeline. */
+  const openThroughPicker = async (result: { current: ReturnType<typeof useProjectActions> }) => {
+    const opened = fakeFileHandle('opened.veditor')
+    const file = projectFile()
+    rememberFileHandle(file, opened.handle)
+    vi.mocked(showOpenProjectDialog).mockResolvedValue(file)
+    await act(async () => {
+      await result.current.handleLoadProject()
+    })
+    return opened
+  }
+
+  it('asks where the first save goes, then writes there again without asking', async () => {
+    const { result } = mountActions()
+
+    await save(result)
+    expect(picker()).toHaveBeenCalledWith({
+      suggestedName: 'Untitled Project.veditor',
+      types: [expect.objectContaining({ accept: { 'application/octet-stream': ['.veditor'] } })],
+    })
+    expect(saveProjectToFile).toHaveBeenCalledWith(picked.handle, deps.project, deps.sourceVideos, undefined, editor)
+    expect(saveProject).not.toHaveBeenCalled()
+    expect(deps.showNotification).toHaveBeenCalledWith('Project saved successfully', 'success')
+
+    await save(result)
+    expect(picker()).toHaveBeenCalledTimes(1)
+    expect(saveProjectToFile).toHaveBeenLastCalledWith(picked.handle, deps.project, deps.sourceVideos, undefined, editor)
+  })
+
+  it('saves after Open over the file that was opened, once write access is given', async () => {
+    const { result } = mountActions()
+    const opened = await openThroughPicker(result)
+
+    await save(result)
+
+    expect(opened.requestPermission).toHaveBeenCalledWith({ mode: 'readwrite' })
+    expect(picker()).not.toHaveBeenCalled()
+    expect(saveProjectToFile).toHaveBeenCalledWith(opened.handle, deps.project, deps.sourceVideos, undefined, editor)
+  })
+
+  it('does not save over the opened file when write access is refused, and says what to do', async () => {
+    const { result } = mountActions()
+    const opened = await openThroughPicker(result)
+    opened.requestPermission.mockResolvedValue('denied')
+
+    await save(result)
+
+    expect(saveProjectToFile).not.toHaveBeenCalled()
+    expect(deps.showNotification).toHaveBeenCalledWith(
+      'Not saved: permission to write to "opened.veditor" was not given. Use Save Project As... to choose a file.',
+      'error'
+    )
+  })
+
+  it('Save As always asks, and later saves go to the new file', async () => {
+    const { result } = mountActions()
+    await openThroughPicker(result)
+
+    await save(result, true)
+    expect(picker()).toHaveBeenCalledTimes(1)
+    expect(saveProjectToFile).toHaveBeenLastCalledWith(picked.handle, deps.project, deps.sourceVideos, undefined, editor)
+
+    await save(result)
+    expect(picker()).toHaveBeenCalledTimes(1)
+    expect(saveProjectToFile).toHaveBeenLastCalledWith(picked.handle, deps.project, deps.sourceVideos, undefined, editor)
+  })
+
+  it('forgets the file on New Project, and on opening a file that came another way', async () => {
+    const { result } = mountActions()
+    await save(result)
+    await act(async () => {
+      await result.current.handleNewProject()
+    })
+    await save(result)
+    expect(picker()).toHaveBeenCalledTimes(2)
+
+    // A dropped file has no handle: the save after it asks again.
+    act(() => result.current.handleProjectFile(projectFile()))
+    await vi.waitFor(() => expect(deps.showNotification).toHaveBeenCalledWith('Project loaded successfully', 'success'))
+    await save(result)
+    expect(picker()).toHaveBeenCalledTimes(3)
+  })
+
+  it('forgets the file when told to (a host replaced the project), so the next save asks', async () => {
+    const { result } = mountActions()
+    await save(result)
+    act(() => result.current.forgetProjectFile())
+    await save(result)
+    expect(picker()).toHaveBeenCalledTimes(2)
+  })
+
+  it('runs one save at a time: a second press while the first is picking opens no second picker', async () => {
+    let choose!: (handle: FileSystemFileHandle) => void
+    uninstall()
+    uninstall = installSavePicker(() => new Promise((resolve) => (choose = resolve)))
+    const { result } = mountActions()
+
+    let first!: Promise<void>
+    act(() => {
+      first = result.current.handleSaveProject()
+    })
+    expect(result.current.isSaving).toBe(true)
+    await act(async () => {
+      await result.current.handleSaveProject()
+    })
+    expect(picker()).toHaveBeenCalledTimes(1)
+    // The refused press did not end the first save early.
+    expect(result.current.isSaving).toBe(true)
+
+    await act(async () => {
+      choose(picked.handle)
+      await first
+    })
+    expect(saveProjectToFile).toHaveBeenCalledTimes(1)
+    expect(result.current.isSaving).toBe(false)
+  })
+
+  it('saves nothing, and says nothing, when the picker is cancelled', async () => {
+    uninstall()
+    uninstall = installSavePicker(() => Promise.reject(domError('AbortError')))
+    const { result } = mountActions()
+
+    await save(result)
+
+    expect(saveProjectToFile).not.toHaveBeenCalled()
+    expect(saveProject).not.toHaveBeenCalled()
+    expect(deps.showNotification).not.toHaveBeenCalled()
+    expect(result.current.isSaving).toBe(false)
+  })
+
+  it('downloads, as before, where the page may not open the picker', async () => {
+    uninstall()
+    uninstall = installSavePicker(() => Promise.reject(domError('SecurityError')))
+    const { result } = mountActions()
+
+    await save(result)
+
+    expect(saveProject).toHaveBeenCalledWith(deps.project, deps.sourceVideos, undefined, editor)
+    expect(saveProjectToFile).not.toHaveBeenCalled()
+  })
+
+  it('shows a write the disk refused in its own words', async () => {
+    const { FileWriteError } = await import('../core/saveFile')
+    vi.mocked(saveProjectToFile).mockRejectedValue(new FileWriteError('Could not write "x": the disk is full.'))
+    const { result } = mountActions()
+
+    await save(result)
+
+    expect(deps.showNotification).toHaveBeenCalledWith('Could not write "x": the disk is full.', 'error')
+  })
+
+  it('Save & Load writes the open project to its file, and a cancelled picker loads nothing', async () => {
+    const { result } = mountActions({ clipCount: 2 })
+    vi.mocked(showOpenProjectDialog).mockResolvedValue(projectFile())
+    await act(async () => {
+      await result.current.handleLoadProject()
+    })
+    uninstall()
+    uninstall = installSavePicker(() => Promise.reject(domError('AbortError')))
+
+    await act(async () => {
+      await result.current.handleProjectLoadSaveAndLoad()
+    })
+
+    expect(loadProject).not.toHaveBeenCalled()
+    expect(result.current.showProjectLoadDialog).toBe(true)
+
+    uninstall()
+    uninstall = installSavePicker(async () => picked.handle)
+    await act(async () => {
+      await result.current.handleProjectLoadSaveAndLoad()
+    })
+    expect(saveProjectToFile).toHaveBeenCalledWith(picked.handle, deps.project, deps.sourceVideos, undefined, editor)
+    expect(loadProject).toHaveBeenCalled()
+  })
+})

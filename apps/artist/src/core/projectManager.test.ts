@@ -6,6 +6,7 @@ import {
   importProjectMetadata,
   loadProject,
   saveProject,
+  saveProjectToFile,
   showOpenProjectDialog,
   type ProjectFile,
   type SourceVideoMeta,
@@ -38,6 +39,8 @@ import { DEFAULT_TEXT_OVERLAY_DATA } from '../store/types'
 import { extractWaveformData } from '../utils/waveform'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
 import { OBJECT_URL_PATTERN, lastObjectUrl } from '../test/objectUrls'
+import { fakeFileHandle } from '../test/doubles/fileHandle'
+import { fileHandleOf } from './saveFile'
 
 // Pass-through spies, so a test can see (and, for the 2 GiB and quota cases,
 // fake) what save and load ask storage for. Everything else is the real layer.
@@ -442,6 +445,35 @@ describe('saveProject', () => {
     expect(index.videos).toEqual([])
     // The project itself is still written out.
     expect(index.project.timeline.clips).toHaveLength(1)
+  })
+
+  // ESCSUITE-470 QC: Save over the opened file must not drop a source the file
+  // may hold the only copy of, as the download above does.
+  it('refuses to write over a picked file when a used source has no stored bytes, naming it, and leaves the file alone', async () => {
+    const missingId = uniqueId('gone')
+    const picked = fakeFileHandle('p.veditor', [7, 7, 7])
+    const source = { ...sourceVideo(missingId), name: 'take-1.webm' }
+
+    const saving = saveProjectToFile(picked.handle, createTestProject(missingId), [source])
+
+    await expect(saving).rejects.toThrow(ProjectFileError)
+    await expect(saving).rejects.toThrow(
+      'Not saved: the media for "take-1.webm" is no longer stored in this browser, so the project file would lose it. ' +
+        'The file was left as it was.'
+    )
+    expect(picked.streams).toHaveLength(0)
+    expect(picked.bytes()).toEqual([7, 7, 7])
+  })
+
+  it('refuses the same way for a clip whose source the library no longer lists', async () => {
+    const goneId = uniqueId('unlisted')
+    const picked = fakeFileHandle('p.veditor', [7])
+
+    await expect(saveProjectToFile(picked.handle, createTestProject(goneId), [])).rejects.toThrow(
+      `the media for "${goneId}" is no longer stored`
+    )
+    expect(picked.streams).toHaveLength(0)
+    expect(picked.bytes()).toEqual([7])
   })
 
   it('names the file "project.veditor" when the project has no name', async () => {
@@ -2249,10 +2281,13 @@ describe('showOpenProjectDialog', () => {
   it('uses the File System Access API when available', async () => {
     const file = new File(['{}'], 'picked.veditor')
     const getFile = vi.fn().mockResolvedValue(file)
-    const picker = vi.fn().mockResolvedValue([{ getFile }])
+    const handle = { getFile }
+    const picker = vi.fn().mockResolvedValue([handle])
     win.showOpenFilePicker = picker
 
     await expect(showOpenProjectDialog()).resolves.toBe(file)
+    // Remembered, so Save can write back over it (ESCSUITE-470).
+    expect(fileHandleOf(file)).toBe(handle)
     expect(picker).toHaveBeenCalledWith({
       types: [{ description: 'Video Editor Project', accept: { 'application/octet-stream': ['.veditor'] } }],
     })
@@ -2337,6 +2372,27 @@ describe('the editor block in the project file (ESCSUITE-245)', () => {
         inPoint: 1, outPoint: 4, markers: [marker('a', 2), marker('b', 5), marker('c', 9)],
       })
     }
+  })
+
+  // ESCSUITE-470: Save over an opened (or picked) file writes what the
+  // download would have, and it opens again.
+  it('writes over a picked file the bytes the download would, and they load back', async () => {
+    const id = uniqueId('fs')
+    const editor = { inPoint: 1, outPoint: 4, markers: [marker('a', 2)] }
+    const picked = fakeFileHandle('p.veditor', [7, 7, 7])
+    const progress: Array<[number, string]> = []
+    await storeVideo(id, new Blob([new Uint8Array([1, 2])], { type: 'video/mp4' }), sourceVideo(id))
+
+    await saveProjectToFile(picked.handle, createTestProject(id), [sourceVideo(id)], (p, m) => progress.push([p, m]), editor)
+    await saveProject(createTestProject(id), [sourceVideo(id)], undefined, editor)
+
+    const written = picked.bytes()!
+    const downloaded = new Uint8Array(await (await lastFile()).arrayBuffer())
+    expect(written).toEqual([...downloaded])
+    expect(progress[progress.length - 1]).toEqual([100, 'Project saved!'])
+    const loaded = await loadProject(fileOf([new Uint8Array(written)], 'p.veditor'))
+    expect(loaded.project.id).toBe('project1')
+    expect(loaded.editor).toEqual(editor)
   })
 
   it('an old file without the block loads with no editor state', async () => {

@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- ESCAPEARTIST: in Chrome and Edge, exporting asks where to save the video and writes it straight to that file as it encodes, and Save writes over the project file you opened or first saved instead of downloading another copy; File > Save Project As... picks a new file (ESCSUITE-470).
 - ESCAPEARTIST: Zoom to region: drag a box on the preview (or type it) and a video clip eases in to fill the frame with it at the playhead, holds, and eases back out, written as ordinary keyframes that one undo removes (ESCSUITE-475).
 - ESCAPEARTIST: a clip can play from 0.25× to 4× (the inspector's new Speed section): its length on the timeline follows, the clips after it move to match, linked parts change speed with it, and its sound plays pitched with the picture up to 2× and silent above, in the preview, every export and the headless render (ESCSUITE-471).
 - ESCAPECRAFT and ESCAPEARTIST: the screen stays on while ESCAPECRAFT records and while ESCAPEARTIST exports (MP4, WebM or GIF) or transcribes, where the browser supports it, and the export window says so; it is given up when the job ends or is cancelled and taken again when the tab is shown after being hidden; the Known limitations page notes that a hidden ESCAPECRAFT tab lets the screen sleep (ESCSUITE-474).

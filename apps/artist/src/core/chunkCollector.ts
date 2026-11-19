@@ -8,6 +8,7 @@
 // encode had run. Writing through a `StreamTarget` into this collector keeps
 // the file as many parts and joins them into one Blob at the end.
 import type { StreamTargetChunk } from 'mediabunny';
+import type { ExportSink } from './saveFile';
 
 /**
  * Bytes collected in memory before they are handed to a Blob. A Blob's bytes
@@ -40,8 +41,7 @@ export const SPILL_BYTES = 64 * 1024 * 1024;
  * emits each flush as merged chunks sorted by start. Do not pass it
  * `chunked: true`, which can deliver a chunk ahead of the bytes before it.
  */
-export function createChunkCollector(spillBytes: number = SPILL_BYTES): {
-  writable: WritableStream<StreamTargetChunk>;
+export function createChunkCollector(spillBytes: number = SPILL_BYTES): ExportSink & {
   toBlob: (type: string) => Blob;
 } {
   const parts: Array<Uint8Array | Blob> = [];
@@ -100,8 +100,11 @@ export function createChunkCollector(spillBytes: number = SPILL_BYTES): {
     }
   };
 
+  const toBlob = (type: string) => new Blob(parts as BlobPart[], { type });
   return {
     writable: new WritableStream<StreamTargetChunk>({ write }),
-    toBlob: (type) => new Blob(parts as BlobPart[], { type }),
+    toBlob,
+    // The download's sink: an export with no file picked joins its parts here.
+    finish: async (type) => toBlob(type),
   };
 }
