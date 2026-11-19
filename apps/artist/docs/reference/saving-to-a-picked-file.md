@@ -24,7 +24,10 @@ checked before anything is awaited, and the download path adds no `await` in fro
   write-backs (a WebM Cluster's size, the Segment's size, Duration and SeekHead; the MP4 `moov`
   in its reserved space) land on bytes already written. No Blob of the output is ever built:
   `finish()` closes the stream, which commits it, and answers `handle.getFile()`, a `File` whose
-  bytes are on disk. That `File` is what an embedding host's `EXPORT_COMPLETE` carries.
+  bytes are on disk. That `File` is what an embedding host's `EXPORT_COMPLETE` carries; posting it
+  passes a reference, so nothing is read into memory. `createWritable()` is opened without
+  `keepExistingData`, so the stream starts empty and a picked file that held more than the
+  export ends up holding the export alone (pinned in the e2e spec).
 - **GIF does not stream.** `gifenc` produces the whole file at the end, so a GIF is encoded as
   before and its finished blob is written to the picked file in one go (`sink.writeAll`). A GIF is
   small next to a video (the dialog already warns about long ones).
@@ -35,9 +38,13 @@ checked before anything is awaited, and the download path adds no `await` in fro
   place only on `close()`. The dialog's `catch` calls `sink.discard()` on every cancel or failure,
   which `abort()`s the stream (deleting the copy). A file that was empty when the export opened
   it (the one the picker just made) is also removed (`FileSystemHandle.remove()`, where the
-  browser has it); a file that held something keeps what it held. Mediabunny closes its target on
-  cancel as well as on finalize, so the sink's `WritableStream` is not the file's own stream:
-  closing it commits nothing.
+  browser has it); a file that held something keeps what it held. Chromium's save picker itself
+  creates the chosen file, emptying one that already existed, the moment the user picks it, so a
+  picked file is always empty here and a cancelled export over an existing file removes it rather
+  than restoring it. Mediabunny closes its target on cancel as well as on finalize, so the sink's
+  `WritableStream` is not the file's own stream: closing it commits nothing. A Cancel that lands
+  after the exporter's last abort check, while `finish()` is committing, leaves the finished
+  (complete) file in place.
 - **A failed write stops the export.** The first write the stream refuses is worded for the user
   (`fileWriteError`: `QuotaExceededError` "the disk is full", `NotAllowedError`/`SecurityError`
   "permission to write to it was taken away", `NotFoundError` "it was moved or deleted",

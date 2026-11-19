@@ -111,6 +111,25 @@ async function readPrivateFile(page: Page, name: string): Promise<Buffer | null>
   return base64 === null ? null : Buffer.from(base64, 'base64')
 }
 
+/**
+ * Fill a private file with `size` bytes of 0xAB before the test writes over
+ * it: a write that does not truncate leaves them after the new bytes.
+ */
+async function seedPrivateFile(page: Page, name: string, size: number): Promise<void> {
+  await page.evaluate(
+    async ({ fileName, bytes }) => {
+      const dir = await navigator.storage.getDirectory()
+      const stream = await (await dir.getFileHandle(fileName, { create: true })).createWritable()
+      await stream.write(new Uint8Array(bytes).fill(0xab))
+      await stream.close()
+    },
+    { fileName: name, bytes: size }
+  )
+}
+
+/** Larger than anything these cases write, so leftover bytes show in the size. */
+const STALE_BYTES = 4 * 1024 * 1024
+
 /** Duration and picture size of a private file as a `<video>` decodes it. */
 async function decodePrivateFile(page: Page, name: string): Promise<{ duration: number; width: number }> {
   return page.evaluate(async (fileName) => {
@@ -145,6 +164,9 @@ test.describe('ESCSUITE-470: export and save to a file the user picks', () => {
       await openArtistWithTextClip(page)
       let downloads = 0
       page.on('download', () => (downloads += 1))
+      // The user picks a file that already holds more than the export will:
+      // it must end up holding the export alone.
+      await seedPrivateFile(page, EXPORT_NAME, STALE_BYTES)
 
       await page.getByRole('button', { name: 'Export video' }).click()
       await page.evaluate(() => ((window as unknown as PickerWindow).__countBlobs = true))
@@ -155,6 +177,8 @@ test.describe('ESCSUITE-470: export and save to a file the user picks', () => {
 
       const bytes = await readPrivateFile(page, EXPORT_NAME)
       expect(bytes, 'nothing was written to the chosen file').not.toBeNull()
+      expect(bytes!.length, "the file kept the old contents' tail").toBeLessThan(STALE_BYTES)
+      expect(bytes!.subarray(-16).every((b) => b === 0xab), "the file ends in the old contents").toBe(false)
       // Media health: a WebM whose video frames each carry their own, rising
       // timecode, and which a <video> decodes for the text clip's five seconds.
       const layout = readWebmLayout(bytes!)
@@ -236,6 +260,9 @@ test.describe('ESCSUITE-470: export and save to a file the user picks', () => {
       test.setTimeout(120_000)
       await installPickers(page)
       await openArtistWithTextClip(page)
+      // An older, larger project is already there: the save must replace it
+      // whole, or the reopen below refuses the bytes left after its end.
+      await seedPrivateFile(page, 'Untitled Project.veditor', STALE_BYTES)
 
       // The first save asks where to go.
       await page.getByRole('button', { name: 'Save project' }).click()
@@ -243,6 +270,7 @@ test.describe('ESCSUITE-470: export and save to a file the user picks', () => {
       expect(await page.evaluate(() => (window as unknown as PickerWindow).__picks)).toBe(1)
       const first = await readPrivateFile(page, 'Untitled Project.veditor')
       expect(first?.length).toBeGreaterThan(0)
+      expect(first!.length).toBeLessThan(STALE_BYTES)
 
       // Open it through the open picker, add a second clip, save again.
       await page.getByRole('button', { name: 'File menu' }).click()

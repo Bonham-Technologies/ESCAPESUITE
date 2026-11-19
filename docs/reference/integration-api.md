@@ -7,8 +7,9 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
 - **PostMessage**: bidirectional communication with the parent window. ARTIST posts `READY` on
   init, and `EXPORT_COMPLETE` with
   `{ blob: Blob, format: 'mp4' | 'webm' | 'gif', name: string, audio?: boolean }`
-  after a successful export (`name` is the download filename; not sent on failure or
-  cancellation). `'gif'` is additive (ESCSUITE-34): a host that handles the two video formats sees
+  after a successful export (`name` is the download filename, or the name of the file the user
+  picked where ARTIST saves to a picked file, ESCSUITE-470, when `blob` is a disk-backed `File`; not
+  sent on failure or cancellation). `'gif'` is additive (ESCSUITE-34): a host that handles the two video formats sees
   a new value of a field it already reads, and needs no change unless it wants to treat a GIF
   differently. `audio` is additive too (ESCSUITE-175) and says whether the file carries an audio
   track: `false` for every GIF (no audio track in the container), for an MP4 exported in a browser
