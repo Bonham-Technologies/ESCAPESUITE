@@ -112,8 +112,9 @@ test.describe('ESCSUITE-473: translate captions on this device', () => {
     await openExportDialog(page)
     const english = await downloadVtt(page, 'English')
     const spanish = await downloadVtt(page, 'Spanish')
-    expect(english.name).toBe('Untitled Project.en.vtt')
-    expect(spanish.name).toBe('Untitled Project.es.vtt')
+    // WebKit's download hands Playwright the name with spaces turned into underscores.
+    expect(english.name).toMatch(/^Untitled[ _]Project\.en\.vtt$/)
+    expect(spanish.name).toMatch(/^Untitled[ _]Project\.es\.vtt$/)
     expect(timings(english.text)).toEqual(['00:00:01.250 --> 00:00:03.500', '00:00:04.000 --> 00:00:06.125'])
     expect(timings(spanish.text)).toEqual(timings(english.text))
     for (const words of SPANISH) expect(spanish.text).toContain(words)
