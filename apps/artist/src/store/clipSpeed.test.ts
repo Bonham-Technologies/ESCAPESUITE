@@ -201,6 +201,49 @@ describe('setClipSpeed', () => {
       expect(store().setClipSpeed(screen.id, 0.5)).toBe(false)
       expect(store().setClipSpeed(screen.id, 2)).toBe(true)
     })
+
+    it('moves a later take whole, its part on a row this take never reaches included', () => {
+      const { screen, mic } = placeTake()
+      // A later take at 10: screen and mic on this take's rows, a camera on a third.
+      const cameraRow = addClip('row3', 0, 1).trackId
+      store().removeClipFromTimeline('row3')
+      const later = { sourceVideoId: video.id, startTime: 0, endTime: 4, duration: 4, linkGroupId: 'later' }
+      store().addClipToTimeline({ ...later, id: 's2', name: 's2' }, screen.trackId, 10)
+      store().addClipToTimeline({ ...later, id: 'm2', name: 'm2', sourceVideoId: audioSource.id }, mic.trackId, 10)
+      store().addClipToTimeline({ ...later, id: 'c2', name: 'c2' }, cameraRow, 10)
+      expect(new Set(['s2', 'm2', 'c2'].map((id) => clipById(id).trackId)).size).toBe(3)
+      expect(store().setClipSpeed(screen.id, 2)).toBe(true)
+      expect(['s2', 'm2', 'c2'].map((id) => clipById(id).timelinePosition)).toEqual([5, 5, 5])
+    })
+
+    it('refuses when a clip it would move is on a locked row', () => {
+      const { screen } = placeTake()
+      const cameraRow = addClip('row3', 0, 1).trackId
+      store().removeClipFromTimeline('row3')
+      const later = { sourceVideoId: video.id, startTime: 0, endTime: 4, duration: 4, linkGroupId: 'later' }
+      store().addClipToTimeline({ ...later, id: 's2', name: 's2' }, screen.trackId, 10)
+      store().addClipToTimeline({ ...later, id: 'c2', name: 'c2' }, cameraRow, 10)
+      store().updateTrack(cameraRow, { locked: true })
+      expect(store().setClipSpeed(screen.id, 2)).toBe(false)
+      expect(clipById('s2').timelinePosition).toBe(10)
+    })
+
+    it('refuses a speed-up that would pull a later clip back over a clip it does not move', () => {
+      // The mic ends at 9; `x` at 9.5 sits before the take's end (10) and
+      // stays put, while `y` at 10 would ripple back by 5 s to 5–10, over `x`.
+      const { screen, mic } = placeTake()
+      store().trimClip(mic.id, 'end', { endTime: 9 }, { startTime: 0, endTime: 10, timelinePosition: 0 })
+      store().addClipToTimeline({ id: 'x', sourceVideoId: audioSource.id, name: 'x', startTime: 0, endTime: 0.4, duration: 0.4 }, mic.trackId, 9.5)
+      store().addClipToTimeline({ id: 'y', sourceVideoId: audioSource.id, name: 'y', startTime: 0, endTime: 5, duration: 5 }, mic.trackId, 10)
+      const before = store().project.timeline.clips
+      expect(store().setClipSpeed(screen.id, 2)).toBe(false)
+      expect(store().project.timeline.clips).toBe(before)
+      // A shorter `y` (5–9 once moved) clears `x`: the speed-up goes through.
+      store().trimClip('y', 'end', { endTime: 4 }, { startTime: 0, endTime: 5, timelinePosition: 10 })
+      expect(store().setClipSpeed(screen.id, 2)).toBe(true)
+      expect(clipById('y').timelinePosition).toBe(5)
+      expect(clipById('x').timelinePosition).toBe(9.5)
+    })
   })
 })
 
@@ -310,6 +353,17 @@ describe('a sped clip in the project file', () => {
     expect(parsed.ok).toBe(false)
     if (parsed.ok) return
     expect(parsed.reason).toContain(reason)
+  })
+
+  it('holds a hand-written speed of 1 to nothing a clip without one is held to', () => {
+    // An unsped clip's duration is not checked against its span, so neither is this one's.
+    expect(parseProject(fileWith({ speed: 1, duration: 9.5 })).ok).toBe(true)
+    expect(parseProject(fileWith({ duration: 9.5 })).ok).toBe(true)
+    // An overlay's stale pair is repaired, as without the key.
+    const overlay = parseProject(fileWith({ speed: 1, overlayType: 'text', startTime: 4, endTime: 10, duration: 3 }))
+    expect(overlay.ok).toBe(true)
+    if (!overlay.ok) return
+    expect(overlay.project.timeline.clips[0]).toMatchObject({ startTime: 0, endTime: 3, duration: 3 })
   })
 
   it('accepts a speed whose duration matches up to float noise', () => {

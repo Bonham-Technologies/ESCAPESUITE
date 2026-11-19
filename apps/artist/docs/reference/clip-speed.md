@@ -39,14 +39,18 @@ the sound, and one says why when the store refuses a change.
 - scales each keyframe's time by `oldSpeed / newSpeed`, so a keyframe stays on
   the source moment it was set on, and caps the in/out presets and a
   Transition Out at `maxPresetDuration` of the new length;
-- **ripples**: the clips that start at or after the group's old end, on the
-  rows of the group's clips, move by the length the group gained or lost, all
-  by the same time (so a later take on those rows stays in step). Other rows,
-  markers and in/out points do not move, as with a ripple delete;
+- **ripples**: the clips that start at or after the group's old end move by
+  the length the group gained or lost, all by the same time, on the group's
+  rows and every row a link reaches from them (`linkedRows`, the rows a cut
+  moves together), so a later take stays in step even with a part (a camera)
+  on a row this take never reaches. Other rows, markers and in/out points do
+  not move;
 - refuses (`false`, nothing written) a speed outside the range, the speed the
   clips already have, an overlay or image, a clip or linked part on a locked
-  track, and a slow-down that would run into a clip it does not move (one that
-  sits between a part's end and the group's end on that part's row).
+  track, a clip it would move on a locked track, and a change that would run a
+  part or a moved clip into a clip it does not move (one that sits between a
+  part's end and the group's end on that row): a slow-down's longer part, or a
+  speed-up's later clips pulled back over it.
 
 ## Playback and export
 
@@ -63,7 +67,9 @@ the sound, and one says why when the store refuses a change.
   sound is **resampled** (linear interpolation, `mixResampled`), so it changes
   pitch with the speed and every sample stays under the frame it was recorded
   with. Above 2× the clip is **silent** in the preview, every export and the
-  speech mix. Pitch-preserving time-stretch is out of scope. The resampler
+  speech mix, and is no reason for sound in `audioCandidateSources` (the
+export dialog's sound note, and the headless render's no-AAC MP4 refusal).
+Pitch-preserving time-stretch is out of scope. The resampler
   writes each output frame once; a frame whose interpolation partner is in the
   next decoded chunk is written held and corrected when that chunk arrives.
 
@@ -84,8 +90,9 @@ the sound, and one says why when the store refuses a change.
 
 `speed` is an additive field: no format version change. `parseProject`
 refuses a `speed` that is present and not a number from 0.25 to 4, one on an
-overlay (other than 1), and one whose clip's `duration` is not
-`(endTime - startTime) / speed` (to 1e-6 of the length): a hand-made file or
+overlay (other than 1), and one other than 1 whose clip's `duration` is not
+`(endTime - startTime) / speed` (to 1e-6 of the length; a hand-written 1 is
+held to nothing a clip without a speed is held to): a hand-made file or
 headless job spec that left `duration` at the unsped length would play the
 source at one rate and lay the clip out at another. An image clip carrying a
 speed in a hand-edited file is not refused (the project lists no media

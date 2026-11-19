@@ -96,7 +96,7 @@ export function SpeedSection({ speed, onSpeedChange, linked, hasPicture, disable
         {linked && <p className={styles.hint}>Its linked parts change speed with it.</p>}
         {refused && (
           <p className={styles.hint} role="status">
-            Not changed: a clip on this row is in the way, or a linked part is on a locked track.
+            Not changed: a clip on its row is in the way, or a track it would move is locked.
           </p>
         )}
       </div>

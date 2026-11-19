@@ -795,28 +795,40 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
 
     // The clips after the group on its rows move by the length it gained or
     // lost, all by the same time, so a later take on those rows stays in step.
-    const rows = new Set(group.map((c) => c.trackId));
+    // The rows are the group's and every row a link reaches from them
+    // (`linkedRows`, the rows a cut moves together): a later take with a part
+    // on a row the group never reaches (its camera) moves whole. A clip that
+    // would move on a locked row refuses the change, as a cut's lock does.
+    const rows = linkedRows(clips, clip);
+    let heldByLock = false;
     const newClips = clips.map((c) => {
       const sped = changed.get(c.id);
       if (sped) return sped;
       if (delta !== 0 && rows.has(c.trackId) && startsAtOrAfter(c, oldEnd)) {
+        if (isTrackLocked(tracks, c.trackId)) heldByLock = true;
         return { ...c, timelinePosition: Math.max(0, c.timelinePosition + delta) };
       }
       return c;
     });
+    if (heldByLock) return false;
 
     // A clip that sat between a part's end and the group's end (on a part's
-    // row) does not move: refuse a slow-down that would run into it. An
-    // overlap the part already had (ESCSUITE-308's imported cues) is not new.
-    for (const part of group) {
-      const sped = changed.get(part.id)!;
-      const end = sped.timelinePosition + sped.duration;
+    // row) does not move: refuse a change that would run a part, or a clip
+    // the ripple moved, into it — a slow-down's longer part, or a speed-up's
+    // later clips pulled back over it. An overlap the moved clip already had
+    // (ESCSUITE-308's imported cues) is not new. `newClips` is `clips` mapped,
+    // so the two line up by index, and an unmoved clip is the same object.
+    for (let i = 0; i < newClips.length; i++) {
+      const now = newClips[i];
+      const was = clips[i];
+      if (now === was) continue;
+      const end = now.timelinePosition + now.duration;
       const blocked = newClips.some(
-        (c, i) =>
-          c.trackId === sped.trackId &&
-          !changed.has(c.id) &&
-          overlapsSpan(c, sped.timelinePosition, end) &&
-          !overlapsSpan(clips[i], part.timelinePosition, part.timelinePosition + part.duration)
+        (c, j) =>
+          c === clips[j] &&
+          c.trackId === now.trackId &&
+          overlapsSpan(c, now.timelinePosition, end) &&
+          !overlapsSpan(c, was.timelinePosition, was.timelinePosition + was.duration)
       );
       if (blocked) return false;
     }

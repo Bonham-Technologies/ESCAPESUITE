@@ -883,11 +883,12 @@ export interface EditorState {
    * media clip linked to it with it, so a take's picture and sound stay in
    * step. Each keeps its source span; its length on the timeline becomes the
    * span divided by the speed, its keyframes stay on the source moments they
-   * were on, and the clips after it on its rows (and its partners' rows) move
-   * by the length gained or lost, as a ripple delete moves them. `false`, and
-   * nothing written, for a speed outside 0.25 to 4, an overlay or an image,
-   * a clip already at that speed, a clip or partner on a locked track, or a
-   * change that would overlap a clip it cannot move; one undo step otherwise.
+   * were on, and the clips after it on its rows (its partners' rows, and
+   * every row a link reaches from them: `linkedRows`) move by the length
+   * gained or lost. `false`, and nothing written, for a speed outside 0.25 to
+   * 4, an overlay or an image, a clip already at that speed, a clip, partner
+   * or clip it would move on a locked track, or a change that would overlap a
+   * clip it does not move; one undo step otherwise.
    */
   setClipSpeed: (clipId: string, speed: number) => boolean;
   moveClipToTrack: (clipId: string, trackId: string) => boolean;

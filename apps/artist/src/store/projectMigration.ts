@@ -657,8 +657,14 @@ export function parseProject(input: unknown, editorInput?: unknown): ParseProjec
       if (present.overlayType && present.speed !== 1) {
         return { ok: false, reason: `Clip "${id}" is an overlay and cannot have a speed` };
       }
+      // A speed of 1 (written by hand: the app drops the key) is no speed, so
+      // its clip is held to nothing a clip without one is not, and an
+      // overlay's pair is left to `repairExtendableClipPairs` as before.
       const expected = sourceSpanToTimeline(startTime, endTime, present.speed);
-      if (Math.abs((timed.duration as number) - expected) > SPEED_DURATION_TOLERANCE * Math.max(1, expected)) {
+      if (
+        present.speed !== 1 &&
+        Math.abs((timed.duration as number) - expected) > SPEED_DURATION_TOLERANCE * Math.max(1, expected)
+      ) {
         return {
           ok: false,
           reason: `Clip "${id}" has speed ${present.speed}, so its duration must be (endTime - startTime) / speed = ${expected}`,
