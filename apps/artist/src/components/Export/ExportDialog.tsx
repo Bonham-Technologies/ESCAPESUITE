@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useDialogBehaviour } from '@escapesuite/shared/hooks';
+import { holdScreenAwake } from '@escapesuite/shared/utils';
 import { useEditorStore } from '../../store/projectStore';
 import {
   exportToWebM,
@@ -185,6 +186,9 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // needs stopping" and never a stale one — which is not the same question
   // as "am I still the run being displayed" below.
   const abortControllerRef = useRef<AbortController | null>(null);
+  // The run whose screen wake lock is actually held (ESCSUITE-474), or null.
+  // Keyed by run so a cancelled export's late release cannot clear a newer one.
+  const [awakeRun, setAwakeRun] = useState<AbortController | null>(null);
   // Identity of the most recently *started* export. Unlike abortControllerRef,
   // this is never cleared by a run's own completion — only overwritten when a
   // *newer* run starts, and explicitly nulled by handleCancel so a cancelled
@@ -465,6 +469,13 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     // The ErrorBoundary unmounts this dialog without reaching handleCancel,
     // and `main.tsx`'s onError aborts whatever is registered here.
     registerLiveExport(abortController);
+    // Keep the screen on for the whole run (ESCSUITE-474). Cancel aborts the
+    // controller, which releases the lock at once; the `finally` below covers
+    // success and failure. Best effort: no API or a refusal changes nothing.
+    const awake = holdScreenAwake({
+      signal: abortController.signal,
+      onChange: (held) => setAwakeRun((prev) => (held ? abortController : prev === abortController ? null : prev)),
+    });
     const isCurrentRun = () => latestExportRef.current === abortController;
 
     // Determine options: primary button uses defaults, advanced button uses configured options
@@ -646,6 +657,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         setProgress(null);
       }
     } finally {
+      awake.release();
       // Clear the abort controller reference — but only if it is still this
       // run's own controller. A cancelled run's `finally` can fire after a
       // later run has already stored its controller here (the cancelled
@@ -787,6 +799,10 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                 <span className={styles.summary} role="status">
                   Estimated size: ~{formatFileSize(progress.estimatedBytes)}
                 </span>
+              )}
+              {/* ESCSUITE-474: shown only while the lock is really held. */}
+              {awakeRun && progress.phase !== 'complete' && (
+                <span className={styles.summary}>Keeping the screen on until the export finishes.</span>
               )}
               {/* The after-the-fact half of `noAudioNote` (ESCSUITE-175): the
                   file is already downloaded by the time this renders, so it
