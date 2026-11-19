@@ -3,97 +3,88 @@
   flex-direction: column;
 }
 
-/* Hero Section */
+/* Hero: the copy on the left, the frame motif on the right. */
 .hero {
-  padding: 6rem 2rem;
-  text-align: center;
-  background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+  padding: 6rem 1.5rem;
+}
+
+.heroInner {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) minmax(0, 4fr);
+  gap: 3rem 4rem;
+  align-items: end;
 }
 
 .heroContent {
-  max-width: 800px;
-  margin: 0 auto;
+  min-width: 0;
 }
 
 .heroTitle {
-  font-size: 3.5rem;
+  font-size: clamp(2.5rem, 6vw, 4.25rem);
   font-weight: 800;
-  line-height: 1.1;
-  margin-bottom: 1.5rem;
-  letter-spacing: -0.03em;
+  line-height: 1;
+  margin-bottom: 2rem;
+  letter-spacing: -0.025em;
 }
 
-.gradient {
-  background: linear-gradient(135deg, var(--accent) 0%, #a855f7 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+/* The phrase the page is about carries the accent rule. */
+.mark {
+  box-shadow: inset 0 -0.1em 0 var(--accent);
 }
 
 .heroSubtitle {
   font-size: 1.25rem;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   margin-bottom: 2rem;
-  line-height: 1.6;
+  line-height: 1.5;
+  max-width: 40rem;
 }
 
 .heroCta {
   display: flex;
-  gap: 1rem;
-  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
 }
 
 .heroCta button,
 .heroCta .btnLink {
-  font-size: 1.1rem;
-  padding: 1rem 2rem;
+  font-size: 1rem;
+  padding: 0.75rem 1.5rem;
+  min-height: 48px;
 }
 
 /* An anchor that looks like a button. Used where the control navigates instead
    of acting on the page — a <button> nested inside an <a> is invalid HTML and
    gives assistive tech two conflicting roles for one control. Mirrors the
-   global `button` / `button.primary` rules in index.css. */
+   global `button` rule in index.css. */
 .btnLink {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line-strong);
   padding: 0.75em 1.5em;
   /* WCAG 2.5.8 touch target — matches the global button rule */
   min-height: 44px;
   font-size: 1em;
-  font-weight: 500;
+  font-weight: 600;
   font-family: inherit;
-  background-color: var(--bg-tertiary);
+  background-color: var(--bg-secondary);
   color: var(--text-primary);
   text-decoration: none;
   cursor: pointer;
-  transition: all 0.2s ease;
 }
 
 .btnLink:hover {
-  background-color: var(--bg-secondary);
-  border-color: var(--accent);
+  border-color: var(--text-primary);
   color: var(--text-primary);
 }
 
 .btnLink:focus,
 .btnLink:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
-}
-
-.btnLinkPrimary {
-  background-color: var(--accent);
-  border-color: var(--accent);
-  color: #ffffff;
-}
-
-.btnLinkPrimary:hover {
-  background-color: var(--accent-hover);
-  border-color: var(--accent-hover);
-  color: #ffffff;
 }
 
 .heroLinks {
@@ -109,42 +100,76 @@
   text-decoration: underline;
 }
 
-/* Section Styles */
-.sectionTitle {
-  text-align: center;
-  margin-bottom: 3rem;
+/* The frame: a recording frame with its picture-in-picture panel, and the
+   timeline's panels under it. Coloured from tokens so it follows the theme. */
+.frame {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 
-/* Tools Section */
+.frameCorner {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.framePanel {
+  fill: var(--bg-secondary);
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+
+.frameLine {
+  fill: var(--text-primary);
+  opacity: 0.16;
+}
+
+.frameNote {
+  fill: var(--text-primary);
+  opacity: 0.4;
+}
+
+.frameAccent {
+  fill: var(--accent);
+}
+
+.framePlayhead {
+  stroke: var(--accent);
+  stroke-width: 1;
+}
+
+/* Section Styles */
+.sectionTitle {
+  max-width: 1200px;
+  margin: 0 auto 3rem;
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  line-height: 1.1;
+}
+
+/* Tools Section: two open columns under a rule, not boxed cards. */
 .tools {
-  padding: 6rem 2rem;
-  background-color: var(--bg-primary);
+  padding: 6rem 1.5rem;
+  border-top: 1px solid var(--border);
+  background-color: var(--bg-secondary);
 }
 
 .toolsGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-  gap: 2rem;
-  max-width: 1000px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 3rem 4rem;
+  max-width: 1200px;
   margin: 0 auto;
 }
 
 .toolCard {
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 2rem;
-  transition: transform 0.2s ease, border-color 0.2s ease;
-}
-
-.toolCard:hover {
-  transform: translateY(-4px);
-  border-color: var(--accent);
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line-strong);
 }
 
 .toolIcon {
-  width: 48px;
-  height: 48px;
+  width: 32px;
+  height: 32px;
   margin-bottom: 1rem;
   color: var(--accent);
 }
@@ -156,61 +181,63 @@
 
 .toolCard h3 {
   margin-bottom: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
 }
 
 .toolCard p {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
   line-height: 1.6;
+  max-width: 34rem;
 }
 
 .featureList {
   list-style: none;
   padding: 0;
+  margin-bottom: 1.5rem;
 }
 
 .featureList li {
   color: var(--text-secondary);
-  padding: 0.5rem 0;
-  padding-left: 1.5rem;
+  padding: 0.5rem 0 0.5rem 1.5rem;
   position: relative;
+  border-bottom: 1px solid var(--border);
 }
 
 .featureList li::before {
-  content: "✓";
+  content: "";
   position: absolute;
   left: 0;
-  color: var(--success);
+  top: 1.05rem;
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
 }
 
 /* Features Section */
 .features {
-  padding: 6rem 2rem;
-  background-color: var(--bg-secondary);
+  padding: 6rem 1.5rem;
+  border-top: 1px solid var(--border);
 }
 
 .featuresGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-  gap: 2rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 3rem 2rem;
   max-width: 1200px;
   margin: 0 auto;
 }
 
 .feature {
-  text-align: center;
-  padding: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line-strong);
 }
 
 .featureIcon {
-  width: 64px;
-  height: 64px;
-  margin: 0 auto 1.5rem;
+  width: 32px;
+  height: 32px;
+  margin-bottom: 1rem;
   color: var(--accent);
-  background-color: var(--bg-tertiary);
-  border-radius: 16px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
 .featureIcon svg {
@@ -219,22 +246,29 @@
 }
 
 .feature h3 {
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.5rem;
 }
 
 .feature p {
   line-height: 1.6;
 }
 
-/* CTA Section */
+/* Open Source Section */
 .cta {
-  padding: 6rem 2rem;
-  text-align: center;
-  background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+  padding: 6rem 1.5rem;
+  border-top: 1px solid var(--border);
+  background-color: var(--bg-secondary);
+}
+
+.cta > * {
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .cta h2 {
   margin-bottom: 1rem;
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
 }
 
 .cta p {
@@ -242,18 +276,17 @@
   font-size: 1.125rem;
 }
 
-.cta button,
-.cta .btnLink {
-  font-size: 1.1rem;
-  padding: 1rem 2.5rem;
+.cta > p:first-of-type {
+  padding-right: max(0px, calc(100% - 44rem));
 }
 
 /* ESCSUITE-401: how to check an offline download. Quieter than the section's
    intro, and the link is underlined because it sits in same-coloured text
    (WCAG 1.4.1, as .heroLinks a). */
 .cta .verifyNote {
-  max-width: 40rem;
-  margin: 2rem auto 0;
+  margin-top: 2rem;
+  margin-bottom: 0;
+  padding-right: max(0px, calc(100% - 44rem));
   font-size: 0.95rem;
   line-height: 1.6;
   color: var(--text-secondary);
@@ -265,12 +298,27 @@
 }
 
 /* Responsive */
+@media (max-width: 960px) {
+  .heroInner {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .frame {
+    max-width: 420px;
+  }
+}
+
 @media (max-width: 768px) {
-  .heroTitle {
-    font-size: 2.5rem;
+  .hero,
+  .tools,
+  .features,
+  .cta {
+    padding-top: 4rem;
+    padding-bottom: 4rem;
   }
 
   .heroCta {
     flex-direction: column;
+    align-items: stretch;
   }
 }

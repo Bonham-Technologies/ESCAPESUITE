@@ -15,6 +15,11 @@ interface FileMenuProps {
   onLoadProject: () => void | Promise<void>;
   /** Save the current project to disk. Async at the source; the result is not awaited here. */
   onSaveProject: () => void | Promise<void>;
+  /**
+   * Save to a newly chosen file (ESCSUITE-470). Absent where the browser
+   * cannot pick one, and so is the item.
+   */
+  onSaveProjectAs?: () => void | Promise<void>;
   /** Open the export dialog. */
   onExport: () => void;
   /** A project load is in flight, so Open is disabled. */
@@ -62,6 +67,7 @@ export function FileMenu({
   onNewProject,
   onLoadProject,
   onSaveProject,
+  onSaveProjectAs,
   onExport,
   isLoading,
   isSaving,
@@ -100,6 +106,9 @@ export function FileMenu({
       disabled: isSaving,
       separatorBefore: false,
     },
+    ...(onSaveProjectAs
+      ? [{ label: 'Save Project As...', run: onSaveProjectAs, disabled: isSaving, separatorBefore: false }]
+      : []),
     {
       label: 'Export Video...',
       shortcut: 'Ctrl+E',

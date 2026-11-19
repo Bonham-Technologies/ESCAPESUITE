@@ -19,3 +19,5 @@ export {
   type Vp9ChunkMetadataLike,
   type Vp9PacketLike,
 } from './vp9ColourSpace'
+
+export { holdScreenAwake, type ScreenAwakeHold, type HoldScreenAwakeOptions } from './screenWakeLock'

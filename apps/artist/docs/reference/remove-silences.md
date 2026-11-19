@@ -125,6 +125,13 @@ track do not raise the legacy-timing note (`hasApproximateTiming`).
 
 Peaks are min/max, not RMS, so a single click inside a pause keeps it.
 
+A **sped clip** (ESCSUITE-471) is read through its speed: its peaks are
+looked up in source time and its silent runs mapped to the timeline as
+`timelinePosition + (sourceTime - startTime) / speed`, and the cut gives each
+piece the source span `sourceTimeAt` names. A clip faster than 2× plays no
+sound, so it is not listened to, as a muted one is not. The minimum gap and
+padding stay timeline seconds. See [`clip-speed.md`](clip-speed.md).
+
 ### Peak timing (`utils/peakTiming.ts`)
 
 Since ESCSUITE-418 a peak is exactly 10 ms: `peaksFromPcm` / `PeakReducer` put

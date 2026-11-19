@@ -12,6 +12,7 @@
 import type { Clip, SourceVideo, Track, WaveformPeak } from '../store/types';
 import { linkedRows } from '../store/rippleRanges';
 import { isVisibleTrack } from '../store/trackVisibility';
+import { clipSpeed, isAudibleSpeed, sourceTimeAt } from '../store/clipSpeed';
 import { peakTimingOf, type PeakTiming } from '../utils/peakTiming';
 
 /** A stretch of time, in seconds; `end` is after `start`. */
@@ -199,10 +200,13 @@ function clipsWithSound(clips: readonly Clip[], sources: readonly SourceVideo[],
   return withSound;
 }
 
-/** Whether the export mixes `clip`'s sound: its row exists, is not muted and is not hidden (`mixInto`). */
+/**
+ * Whether the export mixes `clip`'s sound: its row exists, is not muted and is
+ * not hidden, and the clip is not too fast to be heard (`mixInto`, ESCSUITE-471).
+ */
 function plays(tracks: readonly Track[], clip: Clip): boolean {
   const track = tracks.find((t) => t.id === clip.trackId);
-  return isVisibleTrack(track) && !track.muted;
+  return isVisibleTrack(track) && !track.muted && isAudibleSpeed(clipSpeed(clip));
 }
 
 /**
@@ -273,15 +277,18 @@ export function findTakeSilences(
   let silent: TimeRange[] | null = null;
   for (const { clip, source } of listenedClips(clips, tracks, sources, target)) {
     const audio = peaksOfSource(source);
-    // Source time to timeline time for this clip.
-    const shift = clip.timelinePosition - clip.startTime;
+    // Source time to timeline time for this clip, and back: a sped clip
+    // plays `speed` seconds of source per timeline second (ESCSUITE-471).
+    const speed = clipSpeed(clip);
+    const toTimeline = (t: number) => clip.timelinePosition + (t - clip.startTime) / speed;
     const from = Math.max(span.start, clip.timelinePosition);
     const to = Math.min(span.end, clip.timelinePosition + clip.duration);
     const runs: TimeRange[] = [];
     if (from > span.start) runs.push({ start: span.start, end: from });
     if (audio) {
-      for (const run of certainSilentRuns(audio.peaks, audio.timing, options.thresholdDb, { start: from - shift, end: to - shift })) {
-        runs.push({ start: run.start + shift, end: run.end + shift });
+      const within = { start: sourceTimeAt(clip, from - clip.timelinePosition), end: sourceTimeAt(clip, to - clip.timelinePosition) };
+      for (const run of certainSilentRuns(audio.peaks, audio.timing, options.thresholdDb, within)) {
+        runs.push({ start: toTimeline(run.start), end: toTimeline(run.end) });
       }
     }
     if (to < span.end) runs.push({ start: to, end: span.end });
