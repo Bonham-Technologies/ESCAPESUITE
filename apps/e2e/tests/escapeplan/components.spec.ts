@@ -83,7 +83,7 @@ test.describe('Footer', () => {
 })
 
 test.describe('Per-route SEO', () => {
-  const CANONICAL_ORIGIN = 'https://www.escapesuite.io'
+  const CANONICAL_ORIGIN = 'https://escapesuite.io'
 
   // index.html is served for every SPA route, so without per-route tags each
   // route would claim to be the homepage.

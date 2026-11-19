@@ -68,7 +68,7 @@ export default function Limitations() {
             </li>
           </ol>
           <p>
-            On www.escapesuite.io, every request should go to www.escapesuite.io itself: the apps’ own
+            On escapesuite.io, every request should go to escapesuite.io itself: the apps’ own
             files, and the analytics page views and events under /_vercel/insights/. The offline build
             should make no requests at all, unless you gave ESCAPEARTIST a video address to load. If you
             see anything else, please report it on GitHub.

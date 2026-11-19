@@ -20,7 +20,7 @@ describe('ESCAPEARTIST structured data', () => {
     expect(data['@context']).toBe('https://schema.org')
     expect(data['@type']).toBe('WebApplication')
     expect(data.name).toBe('ESCAPEARTIST')
-    expect(data.url).toBe('https://www.escapesuite.io/artist/')
+    expect(data.url).toBe('https://escapesuite.io/artist/')
     expect(html).toContain(`<link rel="canonical" href="${data.url}" />`)
     expect(data.applicationCategory).toBe('MultimediaApplication')
     expect(data.operatingSystem).toBe('Any (web browser)')
