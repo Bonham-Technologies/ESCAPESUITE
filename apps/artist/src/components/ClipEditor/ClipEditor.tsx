@@ -10,6 +10,8 @@ import { CropSection } from './CropSection';
 import { EffectsSection } from './EffectsSection';
 import { AnimationSection } from './AnimationSection';
 import { TransitionSection } from './TransitionSection';
+import { SpeedSection } from './SpeedSection';
+import { clipSpeed } from '../../store/clipSpeed';
 import { ActionsSection } from './ActionsSection';
 import styles from './ClipEditor.module.css';
 
@@ -36,6 +38,8 @@ export function ClipEditor() {
     handleDeleteClip,
     handleUnlinkClip,
     handleFindSilences,
+    isLinked,
+    handleSpeedChange,
     handleGoToClip,
     handleTransformChange,
     handleDuplicate,
@@ -213,6 +217,21 @@ export function ClipEditor() {
           onTypeChange={handleTransitionTypeChange}
           onDurationChange={handleTransitionDurationChange}
           sliderGesture={sliderGesture}
+          disabled={trackLocked}
+        />
+      )}
+
+      {/* Speed section — video and audio clips (ESCSUITE-471): an overlay
+          or an image has no source timeline to play faster. A new slot of
+          its own after Transition, so no existing section's positional
+          open/closed state changes meaning (CollapsibleSection). */}
+      {(isVideo || isAudio) && (
+        <SpeedSection
+          clipId={selectedClip.id}
+          speed={clipSpeed(selectedClip)}
+          onSpeedChange={handleSpeedChange}
+          linked={isLinked}
+          hasPicture={isVideo}
           disabled={trackLocked}
         />
       )}

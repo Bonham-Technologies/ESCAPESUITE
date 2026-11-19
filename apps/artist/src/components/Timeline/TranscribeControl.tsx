@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDialogBehaviour } from '@escapesuite/shared/hooks';
+import { holdScreenAwake } from '@escapesuite/shared/utils';
 import { useEditorStore } from '../../store/projectStore';
 import { captionStyleFor, captionWrapColumns, wrapCaptionText } from '../../core/captions';
 import type { CaptionCue } from '../../core/captions';
@@ -185,6 +186,8 @@ export function TranscribeControl({ showNotification, onDialogOpenChange }: Tran
     const controller = new AbortController();
     abortRef.current = controller;
     setPhase({ kind: 'mixing', percent: 0 });
+    // ESCSUITE-474: keep the screen on until the run ends, however it ends.
+    const awake = holdScreenAwake({ signal: controller.signal });
     // ESCSUITE-432: the run belongs to the project it was started in. The
     // control lives in the always-mounted timeline, so nothing else ends it:
     // New Project, Open, a host's LOAD_PROJECT or a session restore putting
@@ -331,6 +334,7 @@ export function TranscribeControl({ showNotification, onDialogOpenChange }: Tran
         showNotification('Could not transcribe the timeline.', 'error');
       }
     } finally {
+      awake.release();
       unsubscribe();
       if (abortRef.current === controller) abortRef.current = null;
       setPhase({ kind: 'idle' });

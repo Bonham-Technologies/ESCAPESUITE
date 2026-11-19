@@ -69,13 +69,13 @@ const ARTIST_PACKAGE = path.resolve(HERE, '../../artist/package.json')
  * resolved through ESCAPEARTIST's own dependency so the measurement decodes with
  * the version the editor ships.
  */
-function mediabunnyBundle(): string {
+export function mediabunnyBundle(): string {
   const entry = createRequire(ARTIST_PACKAGE).resolve('mediabunny')
   const root = entry.slice(0, entry.lastIndexOf(`${path.sep}dist${path.sep}`))
   return readFileSync(path.join(root, 'dist', 'bundles', 'mediabunny.min.cjs'), 'utf8')
 }
 
-const ANALYSIS_ORIGIN = 'http://localhost:5174'
+export const ANALYSIS_ORIGIN = 'http://localhost:5174'
 
 /**
  * Measure `file`'s A/V offset at every marker beep, in a fresh page of

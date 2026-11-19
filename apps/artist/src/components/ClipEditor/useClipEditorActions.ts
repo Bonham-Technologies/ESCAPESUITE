@@ -150,6 +150,13 @@ export interface ClipEditorActions {
    * `undefined` when neither it nor a clip linked to it has a waveform to read.
    */
   handleFindSilences: (() => void) | undefined;
+  /** Whether the selected clip is linked to another (ESCSUITE-355). */
+  isLinked: boolean;
+  /**
+   * Set the selected clip's speed, and its linked parts' (ESCSUITE-471).
+   * `false` when the store refused it.
+   */
+  handleSpeedChange: (speed: number) => boolean;
   handleGoToClip: () => void;
   handleTransformChange: (key: 'x' | 'y' | 'scaleX' | 'scaleY' | 'opacity', value: number) => void;
   handleDuplicate: () => void;
@@ -307,6 +314,12 @@ export function useClipEditorActions(): ClipEditorActions {
     if (selectedClip) unlinkClip(selectedClip.id);
   }, [selectedClip, unlinkClip]);
   const handleUnlinkClip = isLinked ? unlinkSelected : undefined;
+
+  const setClipSpeed = useEditorStore((state) => state.setClipSpeed);
+  const handleSpeedChange = useCallback(
+    (speed: number) => (selectedClip ? setClipSpeed(selectedClip.id, speed) : false),
+    [selectedClip, setClipSpeed]
+  );
 
   // ESCSUITE-403: a take's screen part may carry no sound of its own while its
   // microphone does, so a linked partner's waveform is enough.
@@ -708,6 +721,8 @@ export function useClipEditorActions(): ClipEditorActions {
     handleDeleteClip,
     handleUnlinkClip,
     handleFindSilences,
+    isLinked,
+    handleSpeedChange,
     handleGoToClip,
     handleTransformChange,
     handleDuplicate,
