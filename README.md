@@ -15,6 +15,8 @@ Free, open-source (Apache-2.0), privacy-first media creation tools that run enti
 
 Hosted free at [escapesuite.io](https://escapesuite.io) — no account, no sign-up.
 
+Each hosted app works offline after the first visit: open it once while online (in a browser with service workers), and it then opens, records, edits and exports with no connection, until the browser discards the saved copy (for example, Safari after about seven days without a visit). Your media is never part of that saved copy; it stays in your browser's storage as before.
+
 | App | Description | Try it |
 |-----|-------------|--------|
 | **ESCAPEPLAN** | Landing page & hub | [escapesuite.io](https://escapesuite.io) |

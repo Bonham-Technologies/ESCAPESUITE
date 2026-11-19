@@ -14,3 +14,6 @@
 # Infrastructure
 /.github/        @mrbonha
 /scripts/        @mrbonha
+
+# Autopilot rules, agents, hooks and settings (ESCSUITE-476)
+/.claude/        @mrbonha

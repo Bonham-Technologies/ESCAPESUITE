@@ -254,6 +254,8 @@ function runEntryGuardFrom(dirName) {
   const scripts = join(base, dirName, 'scripts');
   mkdirSync(scripts, { recursive: true });
   cpSync(join(here, 'build-all.mjs'), join(scripts, 'build-all.mjs'));
+  // build-all.mjs imports its offline-support step (ESCSUITE-469).
+  cpSync(join(here, 'offline.mjs'), join(scripts, 'offline.mjs'));
   try {
     return execFileSync(process.execPath, [join(scripts, 'build-all.mjs')], {
       encoding: 'utf8',
