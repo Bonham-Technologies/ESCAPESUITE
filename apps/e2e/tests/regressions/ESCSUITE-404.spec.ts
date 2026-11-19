@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { test, expect, type Page } from '@playwright/test'
 import { ARTIST_URL, importMediaAndAddToTimeline, makeToneWav, openExportDialog } from '../../utils/artist'
+import { classifyUrl } from '../../utils/networkSilence'
 import { waitForAppReady } from '../../utils/ready'
 import { timelineClips } from '../../utils/timeline'
 import {
@@ -107,13 +108,20 @@ test.describe('ESCSUITE-404: transcribe to captions on this device', () => {
     await expect(page.getByText('Transcribed 2 captions onto the Captions track.')).toBeVisible({ timeout: 30_000 })
 
     // Criterion 4: no fetch or XHR of the app's own while it transcribed. The
-    // only requests allowed are the lazily loaded transcription module's own
-    // scripts, from the editor's origin.
+    // only network requests allowed are the lazily loaded transcription
+    // module's own scripts, from the editor's origin.
+    //
+    // A `blob:` or `data:` load reads the page's own memory and never reaches
+    // the network (`classifyUrl`), so the second check skips it (ESCSUITE-481):
+    // WebKit reports the preview's <audio> element reading the clip just added
+    // to the timeline as a request, and that element is made only after an
+    // IndexedDB read, so on a slow run its load lands after the listener above
+    // is attached. A fetch or XHR of a blob: URL still fails the first check.
     const origin = new URL(ARTIST_URL).origin
     const ownRequests = requests.filter((r) => r.type === 'fetch' || r.type === 'xhr' || r.type === 'websocket' || r.type === 'eventsource')
     expect(ownRequests, 'the app made a fetch or XHR while transcribing').toEqual([])
     expect(
-      requests.filter((r) => r.type !== 'script' || new URL(r.url).origin !== origin),
+      requests.filter((r) => classifyUrl(r.url, origin) !== 'not-network' && (r.type !== 'script' || new URL(r.url).origin !== origin)),
       'only same-origin module scripts may load while transcribing'
     ).toEqual([])
 

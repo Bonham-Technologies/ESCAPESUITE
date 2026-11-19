@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v31. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v34. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: fleet role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -11,8 +11,9 @@ The fleet role runs as bonham-ops's steward, in place of the dimension sweep und
 everything else in `steward.md` still applies: **Security sweep** of this repo, **Watch
 tickets**, **Decision Log** and **Record in Confluence**; the **Fleet digest** below
 replaces the **Weekly digest**. bonham-ops is the only repo where the role runs. The
-projects come from `autopilot/fleet.json` in this checkout; skip the entry with
-`"fleet": true`, which is this repo. Its panel row's `Steward paused: yes` skips only
+projects are the `autopilot` entries of `autopilot/fleet.json` in this checkout; skip the
+entry with `"fleet": true`, which is this repo. `on-request` and `tracked` entries
+(`repos.md`) get only **Other repos** in the digest. Its panel row's `Steward paused: yes` skips only
 the signal table's **Policy tickets**; the digest still runs. Its `Steward ticket cap`
 caps security tickets only; Policy tickets keep their cap of 10.
 
@@ -156,6 +157,10 @@ A comment on this project's steward log, found as **Weekly digest** says. In ord
   the findings filed (linked), and the oldest open
   finding (`ap-site-review`) with its age, or "none". Then one **Search** line per site:
   `review`'s `line` and the findings filed, or "not read".
+- **Other repos:** the weekly review, one line per `on-request` and `tracked` entry,
+  read only (attached read-only like input 6): its lane and level, `ci-status` on `main`'s
+  head and the newest commit's date; for `on-request`, also its open `needs-owner` PRs
+  and its Jira project's ready tickets, linked. A repo that can't be read is "not read".
 - **Policy findings filed this run**, linked, or "none".
 - The tail of **Weekly digest** for this repo itself: **Open security alerts**,
   **Security scan** and **Setup**. The **Security scan** line adds `pins vs latest:

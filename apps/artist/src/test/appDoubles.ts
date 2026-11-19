@@ -91,6 +91,8 @@ export function projectManagerDouble() {
     saveProject: vi.fn(() => Promise.resolve()),
     loadProject: vi.fn(() => Promise.resolve({ project: {}, sourceVideos: [] })),
     showOpenProjectDialog: vi.fn(() => Promise.resolve(null)),
+    saveProjectToFile: vi.fn(() => Promise.resolve()),
+    PROJECT_FILE_TYPE: { description: 'Video Editor Project', accept: { 'application/octet-stream': ['.veditor'] } },
   }
 }
 

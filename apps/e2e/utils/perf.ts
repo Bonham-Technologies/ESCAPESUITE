@@ -3,6 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, type CDPSession, type Download, type Page } from '@playwright/test'
 import { ARTIST_URL, openExportAdvancedOptions, openExportDialog } from './artist'
+import { NO_LOCAL_FILE_PICKERS } from './filePickers'
 
 /**
  * Benchmark plumbing for `tests/perf/` — the measured windows, the scene they
@@ -59,8 +60,12 @@ export const GESTURE_MOVES = 60
  *   number comparable to a CI one.
  * - `--autoplay-policy=no-user-gesture-required` — the preview drives
  *   `<video>` elements that were never clicked.
+ * - `NO_LOCAL_FILE_PICKERS` — an export downloads rather than asking for a
+ *   file (ESCSUITE-470, `filePickers.ts`).
  */
 export const PERF_LAUNCH_ARGS = [
+  // Exports download rather than ask for a file (`utils/filePickers.ts`).
+  NO_LOCAL_FILE_PICKERS,
   '--enable-precise-memory-info',
   '--disable-gpu',
   '--autoplay-policy=no-user-gesture-required',

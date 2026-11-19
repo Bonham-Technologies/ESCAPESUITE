@@ -10,6 +10,8 @@ import { CropSection } from './CropSection';
 import { EffectsSection } from './EffectsSection';
 import { AnimationSection } from './AnimationSection';
 import { TransitionSection } from './TransitionSection';
+import { SpeedSection } from './SpeedSection';
+import { clipSpeed } from '../../store/clipSpeed';
 import { ActionsSection } from './ActionsSection';
 import styles from './ClipEditor.module.css';
 
@@ -36,6 +38,8 @@ export function ClipEditor() {
     handleDeleteClip,
     handleUnlinkClip,
     handleFindSilences,
+    isLinked,
+    handleSpeedChange,
     handleGoToClip,
     handleTransformChange,
     handleDuplicate,
@@ -45,6 +49,8 @@ export function ClipEditor() {
     handleCropChange,
     cropOnCanvas,
     handleCropOnCanvasToggle,
+    zoomToRegionOpen,
+    handleZoomToRegionToggle,
     handleBlurChange,
     handleTransitionTypeChange,
     handleTransitionDurationChange,
@@ -215,6 +221,21 @@ export function ClipEditor() {
         />
       )}
 
+      {/* Speed section — video and audio clips (ESCSUITE-471): an overlay
+          or an image has no source timeline to play faster. A new slot of
+          its own after Transition, so no existing section's positional
+          open/closed state changes meaning (CollapsibleSection). */}
+      {(isVideo || isAudio) && (
+        <SpeedSection
+          clipId={selectedClip.id}
+          speed={clipSpeed(selectedClip)}
+          onSpeedChange={handleSpeedChange}
+          linked={isLinked}
+          hasPicture={isVideo}
+          disabled={trackLocked}
+        />
+      )}
+
       <ActionsSection
         isVideo={isVideo}
         isAudio={isAudio}
@@ -225,6 +246,10 @@ export function ClipEditor() {
         onSplit={handleSplitAtPlayhead}
         onUnlink={handleUnlinkClip}
         onFindSilences={handleFindSilences}
+        // A video clip only (ESCSUITE-475): an image has no motion to zoom
+        // through, and an overlay or audio clip has no picture to zoom into.
+        onZoomToRegion={isVideo && sourceVideo ? handleZoomToRegionToggle : undefined}
+        zoomToRegionOpen={zoomToRegionOpen}
         disabled={trackLocked}
       />
     </div>

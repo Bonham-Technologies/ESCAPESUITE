@@ -114,30 +114,13 @@ event before navigating.
     between firing the event and the browser following the link, unlike `launchTool`'s same-tab
     `location.assign`
 
-## Theme Support
+## Design and themes
 
-Light/dark theme with CSS variables in `index.css`:
-```css
-:root {
-  --bg-primary: #ffffff;
-  --bg-secondary: #f9fafb;
-  --bg-tertiary: #f3f4f6;
-  --text-primary: #1f2937;
-  --text-secondary: #6b7280;
-  --border-color: #e5e7eb;
-}
-
-[data-theme="dark"] {
-  --bg-primary: #111827;
-  --bg-secondary: #1f2937;
-  --bg-tertiary: #374151;
-  --text-primary: #f9fafb;
-  --text-secondary: #9ca3af;
-  --border-color: #374151;
-}
-```
-
-All components should use these variables instead of hardcoded colors.
+The hub is built on the Bonham Technologies design system, with ESCAPE Suite's own accent (teal)
+and motif (the frame). Tokens are CSS variables in `src/index.css`: Night in `:root` (the default)
+and Daylight in `:root[data-theme="light"]`, switched by the shared theme module. Use the tokens,
+never hardcoded colours; orange (`--signal-fill`) is for the one primary button per view. Rules
+and token list: `docs/reference/escapeplan.md` § Design (ESCSUITE-493).
 
 ## Key Constraints
 

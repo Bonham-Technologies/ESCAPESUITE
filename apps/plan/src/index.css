@@ -1,21 +1,60 @@
+/* ESCAPEPLAN, the ESCAPE Suite hub. Built on the Bonham Technologies design system: warm paper
+   and ink, Archivo for text, IBM Plex Mono for technical content only, square corners,
+   hairlines, no shadows or gradients. ESCAPE Suite's own voice inside that system is one
+   accent, teal (--accent), and one motif, the frame: a recording frame and its panels.
+   Safety orange (--signal-fill) is the action colour and nothing else.
+
+   The token names are the ones the shared components (ThemeToggle, ErrorBoundary) read, so
+   they keep working: --bg-primary is the ground, --bg-secondary the surface, --bg-tertiary
+   the raised or sunken step, --accent the product accent (safe as text and as a focus mark).
+   Night is the default block and Daylight is [data-theme="light"], because that is how the
+   shared theme module switches; with no stored choice it follows the system. */
+
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('./assets/fonts/archivo-latin-wght-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./assets/fonts/ibm-plex-mono-latin-400-normal.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./assets/fonts/ibm-plex-mono-latin-500-normal.woff2') format('woff2');
+}
+
 :root {
-  /* Colors - matching CRAFT/ARTIST dark theme */
-  --bg-primary: #0a0a0f;
-  --bg-secondary: #12121a;
-  --bg-tertiary: #1a1a2e;
-  --text-primary: #ffffff;
-  --text-secondary: #a0a0b0;
-  /* Accent = button/badge BACKGROUND (white text on it must hit 4.5:1, so
-     indigo-600, not indigo-500 which is only 4.46:1). accent-link = accent as
-     TEXT, which on this dark bg must instead be LIGHT to hit 4.5:1. */
-  --accent: #4f46e5;
-  --accent-hover: #4338ca;
-  --accent-link: #818cf8;
-  --accent-link-hover: #a5b4fc;
-  --success: #22c55e;
+  /* Night */
+  --bg-primary: #0f1113;
+  --bg-secondary: #171a1d;
+  --bg-tertiary: #1f2327;
+  --text-primary: #ede9e0;
+  --text-secondary: #a6acb0;
+  --accent: #6cc7c9;
+  --accent-hover: #8fd6d8;
+  --accent-link: #6cc7c9;
+  --accent-link-hover: #8fd6d8;
+  --accent-tint: #14292b;
+  --signal-fill: #ff6a1f;
+  --signal-fill-hover: #ff7f3d;
+  --signal-on: #140f0c;
+  --focus-ring: #7aaef0;
+  --success: #5cc27a;
   --warning: #f59e0b;
   --error: #ef4444;
-  --border: #2a2a3e;
+  --border: #2a2f34;
+  --line-strong: #6a7279;
 
   /* Aliases for component compatibility */
   --border-color: var(--border);
@@ -36,8 +75,11 @@
   --success-bg: #052e16;
   --success-text: #86efac;
 
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  line-height: 1.5;
+  --font-sans: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  font-family: var(--font-sans);
+  line-height: 1.6;
   font-weight: 400;
 
   color-scheme: dark;
@@ -50,23 +92,27 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Light theme */
+/* Daylight */
 :root[data-theme="light"] {
-  --bg-primary: #ffffff;
-  --bg-secondary: #f5f7fa;
-  --bg-tertiary: #e8ecf1;
-  --text-primary: #1a1a2e;
-  --text-secondary: #4a5568;
-  /* Keep accent colors consistent with ESCAPEPLAN identity (indigo-600).
-     On the light bg, accent-as-text stays dark for 4.5:1. */
-  --accent: #4f46e5;
-  --accent-hover: #4338ca;
-  --accent-link: #4f46e5;
-  --accent-link-hover: #4338ca;
-  --success: #22c55e;
+  --bg-primary: #f3f0e8;
+  --bg-secondary: #fbfaf6;
+  --bg-tertiary: #e8e4d9;
+  --text-primary: #16181a;
+  --text-secondary: #4f5559;
+  --accent: #0f6b70;
+  --accent-hover: #0b5357;
+  --accent-link: #0f6b70;
+  --accent-link-hover: #0b5357;
+  --accent-tint: #dcebe9;
+  --signal-fill: #ec5308;
+  --signal-fill-hover: #d54a07;
+  --signal-on: #140f0c;
+  --focus-ring: #2a5a96;
+  --success: #26703a;
   --warning: #f59e0b;
   --error: #dc2626;
-  --border: #d1d5db;
+  --border: #d8d2c4;
+  --line-strong: #8a8477;
 
   /* Aliases for component compatibility */
   --border-color: var(--border);
@@ -107,73 +153,81 @@ body {
 }
 
 a {
-  color: var(--accent-link);
-  text-decoration: none;
-  transition: color 0.2s ease;
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
 }
 
 a:hover {
-  color: var(--accent-link-hover);
+  color: var(--accent-link);
 }
 
+a:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* The secondary button: outlined, on the surface. */
 button {
-  border-radius: 8px;
-  border: 1px solid var(--border);
+  border-radius: 0;
+  border: 1px solid var(--line-strong);
   padding: 0.75em 1.5em;
   /* WCAG 2.5.8 touch target — keep interactive controls comfortably tappable */
   min-height: 44px;
   font-size: 1em;
-  font-weight: 500;
+  font-weight: 600;
   font-family: inherit;
-  background-color: var(--bg-tertiary);
+  background-color: var(--bg-secondary);
   color: var(--text-primary);
   cursor: pointer;
-  transition: all 0.2s ease;
 }
 
 button:hover {
-  background-color: var(--bg-secondary);
-  border-color: var(--accent);
+  border-color: var(--text-primary);
 }
 
 button:focus,
 button:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
+/* The primary button: safety orange, dark text. One per view. */
 button.primary {
-  background-color: var(--accent);
-  border-color: var(--accent);
-  color: white;
+  background-color: var(--signal-fill);
+  border-color: var(--signal-fill);
+  color: var(--signal-on);
 }
 
 button.primary:hover {
-  background-color: var(--accent-hover);
-  border-color: var(--accent-hover);
+  background-color: var(--signal-fill-hover);
+  border-color: var(--signal-fill-hover);
 }
 
 h1, h2, h3, h4, h5, h6 {
   color: var(--text-primary);
-  line-height: 1.2;
+  line-height: 1.15;
 }
 
 h1 {
   font-size: 2.5rem;
-  font-weight: 700;
+  font-weight: 800;
+  letter-spacing: -0.025em;
 }
 
 h2 {
   font-size: 2rem;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: -0.015em;
 }
 
 h3 {
-  font-size: 1.5rem;
+  font-size: 1.25rem;
   font-weight: 600;
 }
 
 p {
   color: var(--text-secondary);
 }
-

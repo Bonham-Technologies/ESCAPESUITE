@@ -198,7 +198,9 @@ later otherwise:
   clip id unique, every clip's track existing, every clip's `startTime` / `endTime` present
   with `endTime` after `startTime` (ESCSUITE-302, overlay clips included), a `crop` or
   `transform` that is present shaped correctly, `resolution` (if the project carries one) within
-  range. A failure is reported as
+  range, and a clip `speed` that is present (ESCSUITE-471) from 0.25 to 4, on a media clip, with
+  `duration` equal to `(endTime - startTime) / speed`. A sped clip renders exactly as the editor
+  exports it: the headless page runs the editor's own exporters. A failure is reported as
   `Invalid project: <reason>`, naming the problem rather than rendering a frame silently missing
   the offending clip.
 
