@@ -310,7 +310,10 @@ on demand.
   shell, unstubbed, opens the editor without "Target crashed" and shows no control; every `start()` on device with a live
   audio track carrying the timeline's sound; the stub's words become caption clips and appear
   in the downloaded `.srt` and `.vtt`; one Ctrl+Z removes them; no fetch or XHR while
-  transcribing; a `downloadable` pack is installed only after the notice.
+  transcribing, and no network load but the transcription module's own same-origin scripts (`blob:` and
+  `data:` loads are memory, not network: WebKit reports the preview's `<audio>` reading the clip just
+  added as a request, sometimes after the spec starts listening, ESCSUITE-481); a `downloadable` pack is
+  installed only after the notice.
 - **No launch flag is needed.** Playwright's Chromium headless shell (what `chromium.launch()`
   runs headless, in CI too) is a bare embedder: `available()` kills its renderer. The editor
   never calls it on load, and the brand gate hides the control there, so every e2e project

@@ -14,8 +14,9 @@ the first visit".
 - **PostMessage**: bidirectional communication with the parent window. ARTIST posts `READY` on
   init, and `EXPORT_COMPLETE` with
   `{ blob: Blob, format: 'mp4' | 'webm' | 'gif', name: string, audio?: boolean }`
-  after a successful export (`name` is the download filename; not sent on failure or
-  cancellation). `'gif'` is additive (ESCSUITE-34): a host that handles the two video formats sees
+  after a successful export (`name` is the download filename, or the name of the file the user
+  picked where ARTIST saves to a picked file, ESCSUITE-470, when `blob` is a disk-backed `File`; not
+  sent on failure or cancellation). `'gif'` is additive (ESCSUITE-34): a host that handles the two video formats sees
   a new value of a field it already reads, and needs no change unless it wants to treat a GIF
   differently. `audio` is additive too (ESCSUITE-175) and says whether the file carries an audio
   track: `false` for every GIF (no audio track in the container), for an MP4 exported in a browser
@@ -127,6 +128,10 @@ the first visit".
   `allow="on-device-speech-recognition"`, or the control hides on its first press. A host that
   is a bare Chromium embedder (Electron, CEF: a `Chromium` brand and no vendor brand) gets no
   control at all, because there `available()` would kill the renderer (`on-device-transcription.md`).
+  Keeping the screen on during exports, transcription and CRAFT recording (ESCSUITE-474) uses the
+  `screen-wake-lock` feature, also `self` by default: a cross-origin host must delegate it with
+  `allow="screen-wake-lock"`, or the job runs as before with the screen left to the OS settings
+  and nothing is shown.
 - **`?tabKey=<name>`** (ARTIST): the host's name for this frame, so two or more editors framed in
   one host page keep a saved session each (ESCSUITE-332). **Every host should pass one — a page that
   frames a single editor included — and a different one to each frame** when it frames several: every same-origin frame of a page shares the top-level

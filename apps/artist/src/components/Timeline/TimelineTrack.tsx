@@ -7,6 +7,7 @@ import { drawnSecondsPerPeak } from '../../utils/peakTiming';
 import { CLIP_THUMB_ASPECT, maskClipPathFor } from '../../utils/maskClipPath';
 import { pruneVisibleRangeCache } from './visibleRangeCache';
 import type { DragState, TrimState } from './types';
+import { clipSpeed, formatClipSpeed } from '../../store/clipSpeed';
 import styles from './Timeline.module.css';
 
 /**
@@ -360,7 +361,11 @@ export const TimelineTrack = React.memo(function TimelineTrack({
                 </svg>
               )}
               <span className={styles.clipName}>{clip.name}</span>
-              <span className={styles.clipDuration}>{formatTime(clip.duration)}</span>
+              <span className={styles.clipDuration}>
+                {formatTime(clip.duration)}
+                {/* A sped clip says so where its length is (ESCSUITE-471). */}
+                {clipSpeed(clip) !== 1 && ` · ${formatClipSpeed(clipSpeed(clip))}`}
+              </span>
             </div>
             {/* Keyframe diamonds */}
             <ClipKeyframeDiamonds clip={clip} pixelsPerSecond={pixelsPerSecond} />
