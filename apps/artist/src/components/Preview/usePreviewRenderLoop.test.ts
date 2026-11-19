@@ -1762,3 +1762,50 @@ describe('usePreviewRenderLoop with two clips of one source (ESCSUITE-313)', () 
     expect(drawnTimes(deps)).toEqual([1])
   })
 })
+
+describe('usePreviewRenderLoop and a sped clip (ESCSUITE-471)', () => {
+  it('seeks a scrub to the source time the speed puts under the playhead', async () => {
+    addClip('clip1', 0, 10)
+    store().setClipSpeed('clip1', 2)
+    const { deps, seek } = harness()
+    const element = deps.videoElementsRef.current.get(video.id)!
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    seek(1.5)
+    await settle(FRAME_MS)
+
+    expect(element.currentTime).toBe(3)
+  })
+
+  it('plays the element at the speed, pitched with it, from the sped source time', async () => {
+    addClip('clip1', 0, 10)
+    store().setClipSpeed('clip1', 0.5)
+    const { deps, play, seek } = harness()
+    const element = deps.videoElementsRef.current.get(video.id)! as HTMLVideoElement & { preservesPitch?: boolean }
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    seek(4)
+    await settle(FRAME_MS)
+    play()
+    await settle(FRAME_MS)
+
+    expect(element.playbackRate).toBe(0.5)
+    expect(element.preservesPitch).toBe(false)
+    expect(element.muted).toBe(false)
+    expect(element.currentTime).toBeCloseTo(2, 1)
+  })
+
+  it('plays a clip faster than 2× silent', async () => {
+    addClip('clip1', 0, 10)
+    store().setClipSpeed('clip1', 4)
+    const { deps, play } = harness()
+    const element = deps.videoElementsRef.current.get(video.id)!
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(FRAME_MS)
+
+    expect(element.playbackRate).toBe(4)
+    expect(element.muted).toBe(true)
+  })
+})
