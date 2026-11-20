@@ -23,7 +23,10 @@ export const VP9_COLOR_SPACE: Record<string, number> = { bt470bg: 1, bt709: 2, s
 /** The VP9 `color_space` code for each Matroska MatrixCoefficients value that has one. */
 export const VP9_COLOR_SPACE_FOR_MATROSKA_MATRIX: Record<number, number> = { 1: 2, 5: 1, 6: 3 }
 
-/** The header's profile and `color_space`, or null when `frame` is not a shown key frame. */
+/**
+ * The header's profile and `color_space`, or null when `frame` does not start
+ * with a key frame header (a show_existing_frame or an inter frame).
+ */
 export function readVp9KeyFrameHeader(frame: Uint8Array): Vp9KeyFrameHeader | null {
   let at = 0
   const bit = () => {

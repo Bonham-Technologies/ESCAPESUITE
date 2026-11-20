@@ -180,7 +180,7 @@ function expectKeyFrameColourSpace(layout: WebmLayout, expected: number): void {
   })
 
   const first = headers[0]
-  expect(first, 'the first key frame is a shown key frame').not.toBeNull()
+  expect(first, 'the first key frame starts with a key frame header').not.toBeNull()
   expect(
     first!.colorSpace,
     `the first key frame's color_space is ${CS_NAMES[first!.colorSpace]}, want ${CS_NAMES[expected]}`
@@ -189,7 +189,7 @@ function expectKeyFrameColourSpace(layout: WebmLayout, expected: number): void {
   const wrong = headers.flatMap((header, i) =>
     header?.colorSpace === expected
       ? []
-      : [`key frame at ${keys[i].time} ms: ${header ? CS_NAMES[header.colorSpace] : 'not a shown key frame'}`]
+      : [`key frame at ${keys[i].time} ms: ${header ? CS_NAMES[header.colorSpace] : 'no key frame header'}`]
   )
   expect(wrong, `key frames whose color_space is not ${CS_NAMES[expected]}`).toEqual([])
 
@@ -236,10 +236,13 @@ test.describe('ESCSUITE-485: VP9 key frame headers carry the colour matrix', () 
       await openExportDialog(page)
 
       const downloadWebM = page.getByRole('button', { name: 'Download WebM' }).first()
+      // Chromium must assert, never skip: a skip there would hide the whole guard on every PR.
+      if (browserName === 'chromium') await expect(downloadWebM, 'Chromium can export WebM').toBeEnabled()
       test.skip(!(await downloadWebM.isEnabled()), 'This browser cannot export WebM')
       const download = page.waitForEvent('download', { timeout: 90_000 })
       await downloadWebM.click()
       const layout = readWebmLayout(new Uint8Array(readFileSync(await (await download).path())))
+      if (browserName === 'chromium') expect(layout.videoCodec, 'Chromium exports VP9').toBe('V_VP9')
       test.skip(layout.videoCodec === 'V_VP8', 'This browser has no VP9 encoder: the export fell back to VP8, whose header has no color_space')
       await expectForced(page, forceUnknown, browserName)
 
@@ -279,6 +282,7 @@ test.describe('ESCSUITE-485: VP9 key frame headers carry the colour matrix', () 
           return false
         }
       })
+      if (browserName === 'chromium') expect(vp9, 'Chromium has a VP9 encoder').toBe(true)
       test.skip(!vp9, 'This browser has no VP9 encoder, which the CRAFT WebCodecs recorder needs')
 
       await recordATake(page)
@@ -297,8 +301,8 @@ test.describe('ESCSUITE-485: VP9 key frame headers carry the colour matrix', () 
           description: "Firefox's BT.709 report, which ESCSUITE-284 measured over BT.601 pixels: CRAFT keeps it",
         })
       }
+      if (browserName === 'chromium') expect(report.colorSpace?.matrix, 'Chromium reports BT.709').toBe('bt709')
       const expected = codeForReport(report)
-      if (browserName === 'chromium') expect(expected, 'Chromium reports BT.709').toBe(VP9_COLOR_SPACE.bt709)
       expectKeyFrameColourSpace(layout, expected)
     })
   }
