@@ -173,6 +173,11 @@
   cursor: pointer;
 }
 
+/* "Show N more" under a list longer than a page (ESCSUITE-487). */
+.showMore {
+  align-self: flex-start;
+}
+
 .rowButton:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
