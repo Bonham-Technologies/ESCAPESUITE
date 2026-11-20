@@ -42,10 +42,12 @@ function clock(t: number): string {
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /**
- * The most pauses the list draws (ESCSUITE-487). Each row is three buttons, so
- * a few thousand made every keystroke in the fields slow; above this the list
- * shows the first ones and the summary says how many were found. Display only:
- * Remove all still cuts every pause found, and the timeline draws them all.
+ * How many pauses the list draws at a time (ESCSUITE-487). Each row is three
+ * buttons, so a few thousand made every keystroke in the fields slow; above
+ * this the list shows the first ones, the summary says how many were found,
+ * and "Show N more" draws the next ones, so every pause can still be gone to,
+ * played or kept. Display only: Remove all still cuts every pause found, and
+ * the timeline draws them all.
  */
 const LISTED_PAUSES = 500;
 
@@ -227,6 +229,19 @@ function SilenceReview({ onRemoved }: SilenceDialogProps) {
     (keepButtons.current[target] ?? cancelButton.current)?.focus();
   });
 
+  // ESCSUITE-487: how many rows the list draws; "Show N more" adds a page and
+  // moves focus to the first row it drew (its Go to), since the button goes
+  // once nothing is left to show. Finding the pauses again starts over.
+  const [shown, setShown] = useState(LISTED_PAUSES);
+  const goToButtons = useRef<(HTMLButtonElement | null)[]>([]);
+  const focusAfterMore = useRef<number | null>(null);
+  useEffect(() => {
+    const target = focusAfterMore.current;
+    if (target === null) return;
+    focusAfterMore.current = null;
+    goToButtons.current[target]?.focus();
+  });
+
   // ESCSUITE-443: Go to and Play let a pause be heard before it is cut. The
   // row last gone to or played is the active one, scrolled into view.
   // A Play stops when the review closes, however it closes, or unmounts.
@@ -266,6 +281,7 @@ function SilenceReview({ onRemoved }: SilenceDialogProps) {
       options[field.key] = value;
     }
     const { project, sourceVideos } = useEditorStore.getState();
+    setShown(LISTED_PAUSES);
     setSilenceCandidates(findTakeSilences(project.timeline.clips, project.timeline.tracks, sourceVideos, review.clipId, options));
   };
 
@@ -305,7 +321,13 @@ function SilenceReview({ onRemoved }: SilenceDialogProps) {
   // ESCSUITE-487: the list stays as it was while a field does not read, so it
   // is not what the fields say; nothing is cut until they do.
   const settled = FIELDS.every((field) => parsed(field.key, values[field.key]) !== null);
-  const listed = candidates.length > LISTED_PAUSES ? candidates.slice(0, LISTED_PAUSES) : candidates;
+  const listed = candidates.length > shown ? candidates.slice(0, shown) : candidates;
+  const more = Math.min(LISTED_PAUSES, candidates.length - listed.length);
+
+  const handleShowMore = () => {
+    focusAfterMore.current = listed.length;
+    setShown(listed.length + LISTED_PAUSES);
+  };
 
   return (
     <div className={styles.overlay} data-testid="silence-dialog">
@@ -357,7 +379,7 @@ function SilenceReview({ onRemoved }: SilenceDialogProps) {
               ? 'No pauses to cut with these settings.'
               : `${candidates.length} ${candidates.length === 1 ? 'pause' : 'pauses'} found · ${seconds(total)} will be cut`}
             {listed.length < candidates.length &&
-              `. The list shows the first ${listed.length}; Remove all cuts all ${candidates.length}.`}
+              `. The list shows the first ${listed.length} of ${candidates.length}; Remove all cuts all ${candidates.length}.`}
             {nearlyAll && ` This removes 90 % or more of ${reviewed.name || 'the clip'}.`}
           </p>
 
@@ -410,6 +432,9 @@ function SilenceReview({ onRemoved }: SilenceDialogProps) {
                     </span>
                     <span className={styles.rowActions}>
                       <button
+                        ref={(el) => {
+                          goToButtons.current[i] = el;
+                        }}
                         type="button"
                         className={styles.rowButton}
                         onClick={() => handleGoTo(range)}
@@ -442,6 +467,11 @@ function SilenceReview({ onRemoved }: SilenceDialogProps) {
                 );
               })}
             </ul>
+          )}
+          {more > 0 && (
+            <button type="button" className={`${styles.rowButton} ${styles.showMore}`} onClick={handleShowMore}>
+              Show {count(more, 'more pause', 'more pauses')}
+            </button>
           )}
 
           {locked || refused === 'locked' ? (

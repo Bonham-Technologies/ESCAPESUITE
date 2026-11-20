@@ -794,15 +794,19 @@ describe('Remove silences: a floor on the minimum gap and a cap on the list (ESC
     const user = userEvent.setup()
     const { rerender, onRemoved } = renderEditor()
     await user.click(screen.getByRole('button', { name: 'Find silences' }))
-    rerender(
-      <>
-        <ClipEditor />
-        <Dialog onRemoved={onRemoved} />
-        {bands && <TimelineSilenceBands pixelsPerSecond={50} height={100} />}
-      </>
-    )
-    return { user, onRemoved }
+    const redraw = () =>
+      rerender(
+        <>
+          <ClipEditor />
+          <Dialog onRemoved={onRemoved} />
+          {bands && <TimelineSilenceBands pixelsPerSecond={50} height={100} />}
+        </>
+      )
+    redraw()
+    return { user, onRemoved, redraw }
   }
+
+  const showMore = () => screen.queryByRole('button', { name: /^Show \d+ more pauses?$/ })
 
   it('refuses a minimum gap under 0.1 s with the invalid-field hint, and Remove all waits for it', async () => {
     const { screen: part } = placeTake()
@@ -858,12 +862,13 @@ describe('Remove silences: a floor on the minimum gap and a cap on the list (ESC
 
     expect(store().silenceReview!.candidates).toHaveLength(600)
     expect(screen.getByRole('status')).toHaveTextContent(
-      '600 pauses found · 360.00 s will be cut. The list shows the first 500; Remove all cuts all 600.'
+      '600 pauses found · 360.00 s will be cut. The list shows the first 500 of 600; Remove all cuts all 600.'
     )
     expect(pauses()).toHaveLength(500)
     expect(pauses()[499]).toHaveTextContent('8:19.10 – 8:19.70')
     // The bands are where the cuts go, so every one is drawn.
     expect(screen.getAllByTestId('silence-band')).toHaveLength(600)
+    expect(showMore()).toHaveTextContent('Show 100 more pauses')
 
     // Keep still drops the row pressed, and the next one moves up into the list.
     await user.click(screen.getByRole('button', { name: 'Keep the pause at 0:00.10' }))
@@ -895,5 +900,50 @@ describe('Remove silences: a floor on the minimum gap and a cap on the list (ESC
     expect(store().silenceReview!.candidates).toHaveLength(500)
     expect(pauses()).toHaveLength(500)
     expect(screen.getByRole('status')).toHaveTextContent(/^500 pauses found · 300\.00 s will be cut$/)
+    expect(showMore()).toBeNull()
   }, 20_000)
+
+  it('shows 500 more pauses at a time, then the rest, moving focus to the first new row, and Keep works past 500', async () => {
+    const { user } = await openDialog(placeChoppy(1100).id)
+    expect(pauses()).toHaveLength(500)
+    expect(showMore()).toHaveTextContent('Show 500 more pauses')
+
+    await user.click(showMore()!)
+    expect(pauses()).toHaveLength(1000)
+    expect(screen.getByRole('button', { name: 'Go to the pause at 8:20.10' })).toHaveFocus()
+    expect(screen.getByRole('status')).toHaveTextContent('The list shows the first 1000 of 1100; Remove all cuts all 1100.')
+
+    await user.click(showMore()!)
+    expect(pauses()).toHaveLength(1100)
+    expect(showMore()).toBeNull()
+    expect(screen.getByRole('button', { name: 'Go to the pause at 16:40.10' })).toHaveFocus()
+    expect(screen.getByRole('status')).toHaveTextContent(/^1100 pauses found · 660\.00 s will be cut$/)
+
+    // A pause the first page never listed can be kept.
+    await user.click(screen.getByRole('button', { name: 'Keep the pause at 16:40.10' }))
+    expect(store().silenceReview!.candidates).toHaveLength(1099)
+    expect(store().silenceReview!.candidates.some((r) => Math.abs(r.start - 1000.1) < 1e-6)).toBe(false)
+    expect(pauses()).toHaveLength(1099)
+    expect(screen.getByRole('button', { name: 'Keep the pause at 16:41.10' })).toHaveFocus()
+  }, 30_000)
+
+  it('starts again from 500 rows when the pauses are found again, or the dialog is opened again', async () => {
+    const { user, redraw } = await openDialog(placeChoppy(1100).id)
+    await user.click(showMore()!)
+    expect(pauses()).toHaveLength(1000)
+
+    const padding = screen.getByLabelText('Padding (s)')
+    await user.clear(padding)
+    await user.type(padding, '0.2')
+    expect(store().silenceReview!.candidates).toHaveLength(1100)
+    expect(pauses()).toHaveLength(500)
+    expect(showMore()).toHaveTextContent('Show 500 more pauses')
+
+    await user.click(showMore()!)
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    redraw()
+    await user.click(screen.getByRole('button', { name: 'Find silences' }))
+    redraw()
+    expect(pauses()).toHaveLength(500)
+  }, 30_000)
 })

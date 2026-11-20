@@ -78,11 +78,16 @@ The summary adds "This removes 90 % or more of <clip name>." when the cuts total
 ### Many pauses (ESCSUITE-487)
 
 Each row is three buttons and the list is not virtualised, so above
-`LISTED_PAUSES` (500) the list draws only the first 500 and the summary says
-so: "3600 pauses found · 2160.00 s will be cut. The list shows the first 500;
-Remove all cuts all 3600." The cap is display only: **Remove all** cuts every
-pause found, as one undo step, and Keep on a listed row brings the next one
-up into the list. The timeline still draws every pause, but pauses less than
+`LISTED_PAUSES` (500) the list draws a page of 500 rows at a time and the
+summary says so: "3600 pauses found · 2160.00 s will be cut. The list shows
+the first 500 of 3600; Remove all cuts all 3600." A **Show 500 more pauses**
+button under the list (the remaining count on the last page, "Show 100 more
+pauses") draws the next page and moves focus to the first row it drew (that
+row's Go to), so every pause can still be gone to, played or kept; the button
+goes once every pause is listed. The page count starts over at 500 whenever
+the pauses are found again (a field changes) and on each opening. The cap is
+display only: **Remove all** cuts every pause found, as one undo step, and
+Keep on a listed row brings the next one up into the list. The timeline still draws every pause, but pauses less than
 a pixel apart at the current zoom are drawn as one band, since the gap between
 them cannot be seen. Zoomed in far enough that every gap is a pixel or more
 (a 10 ms gap is a pixel at 100 px/s, zoom 2×), each pause is still a band of
@@ -395,8 +400,11 @@ description, when nothing is left behind.
 - `src/components/SilenceDialog.test.tsx` (ESCSUITE-487): 0, 0.05 and −1 s
   refused with the hint and Remove all disabled, 0.1 s accepted; Remove all
   disabled while any field does not read; ten minutes of choppy talk lists
-  500 of its 600 pauses, says so, draws every band, and Remove all (after a
-  Keep) cuts all 599; no cap note at exactly 500; bands less than a pixel apart
+  500 of its 600 pauses, says so, offers "Show 100 more pauses", draws every
+  band, and Remove all (after a Keep) cuts all 599; no cap note or button at
+  exactly 500; 1,100 pauses shown 500 more then the last 100, focus on the
+  first new row's Go to each time, and Keep on a pause past the 1,000th; the
+  page count back to 500 after a field change and after reopening; bands less than a pixel apart
   merged at 50 px/s and not at 500 px/s.
 - `apps/e2e/tests/regressions/ESCSUITE-487.spec.ts`: 0 typed into Minimum gap
   is marked invalid with the hint, the list is not found again and Remove all

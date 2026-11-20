@@ -6,7 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
-- ESCAPEARTIST: Remove silences' Minimum gap starts at 0.1 s instead of 0, Remove all waits while a setting does not read, and above 500 pauses the list shows the first 500 while the summary gives the count and Remove all still cuts them all, so an hour-long recording stays quick to tune (ESCSUITE-487).
+- ESCAPEARTIST: Remove silences' Minimum gap starts at 0.1 s instead of 0, Remove all waits while a setting does not read, and above 500 pauses the list shows them 500 at a time with a Show more button while the summary gives the count and Remove all still cuts them all, so an hour-long recording stays quick to tune (ESCSUITE-487).
 - ESCAPEARTIST: in Chrome and Edge, exporting asks where to save the video and writes it straight to that file as it encodes, and Save writes over the project file you opened or first saved instead of downloading another copy; File > Save Project As... picks a new file (ESCSUITE-470).
 - ESCAPEARTIST: Zoom to region: drag a box on the preview (or type it) and a video clip eases in to fill the frame with it at the playhead, holds, and eases back out, written as ordinary keyframes that one undo removes (ESCSUITE-475).
 - ESCAPEARTIST: a clip can play from 0.25× to 4× (the inspector's new Speed section): its length on the timeline follows, the clips after it move to match, linked parts change speed with it, and its sound plays pitched with the picture up to 2× and silent above, in the preview, every export and the headless render (ESCSUITE-471).
