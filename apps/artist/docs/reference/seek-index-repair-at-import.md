@@ -36,7 +36,12 @@ what is already stored.
   every VP9 key frame header's `color_space` from the source's Colour element
   (`fixVP9ColorSpace`). The remux does not restore that — the export does, for frames it encodes
   (`webm-export-reliability.md`, ESCSUITE-284) — so a remuxed take's headers stay as its encoder
-  wrote them (an ESCAPECRAFT WebCodecs take's already carry the reported matrix). **Alpha is preserved**: Mediabunny reads a
+  wrote them (an ESCAPECRAFT WebCodecs take's already carry the reported matrix). Whether a repaired Firefox VP9 file previews with a colour shift since then is **not measured
+  in a browser**. ESCSUITE-485 read the code: only a WebM with no usable Cues is repaired (a
+  MediaRecorder file, never a Mediabunny-written one), and the repair now keeps the header the
+  recording browser's encoder wrote, which is what that browser's own `<video>` was already
+  showing before import; up to 1.65 the remux instead made the header agree with the file's
+  Colour element. A shift is likely only for a file whose Colour element and header disagree. **Alpha is preserved**: Mediabunny reads a
   BlockGroup's BlockAdditional (BlockAddID 1) on an `AlphaMode` 1 track as `sideData.alpha` and
   writes it back the same way on a track it marks `AlphaMode` 1 — pinned over a hand-built
   BlockGroup+BlockAdditions WebM (`test/fixtures/webmFixture.ts`) by packet count, timestamp,

@@ -160,3 +160,31 @@ export async function storedTakeHealth(page: Page): Promise<StoredTakeHealth> {
     return { duration, seeked, seekedTo, audioChannels, audioSeconds, size: blob.size }
   })
 }
+
+/**
+ * The bytes of the one recording in `video-editor-db`, read out of the page.
+ * The callers record exactly one take in a fresh context.
+ */
+export async function storedRecordingBytes(page: Page): Promise<Uint8Array> {
+  const base64 = await page.evaluate(
+    () =>
+      new Promise<string>((resolve, reject) => {
+        const request = indexedDB.open('video-editor-db')
+        request.onerror = () => reject(new Error('Failed to open video-editor-db'))
+        request.onsuccess = () => {
+          const getAll = request.result.transaction('videos', 'readonly').objectStore('videos').getAll()
+          getAll.onerror = () => reject(new Error('Failed to read videos store'))
+          getAll.onsuccess = async () => {
+            const records = getAll.result as Array<{ blob: Blob; metadata?: { source?: string } }>
+            const takes = records.filter((r) => r.metadata?.source === 'recording')
+            if (takes.length !== 1) return reject(new Error(`Expected one recording, found ${takes.length}`))
+            const bytes = new Uint8Array(await takes[0].blob.arrayBuffer())
+            let binary = ''
+            for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
+            resolve(btoa(binary))
+          }
+        }
+      })
+  )
+  return new Uint8Array(Buffer.from(base64, 'base64'))
+}
