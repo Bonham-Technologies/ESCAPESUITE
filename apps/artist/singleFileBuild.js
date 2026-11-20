@@ -16,15 +16,15 @@
  * so a downloaded build's MP4 export hung forever trying to start a worker
  * that was never there.
  *
- * Plain JS, not TypeScript (ESCSUITE-153 review round 1, NIT): `vite.config.ts`
- * is type-checked under `tsconfig.node.json`, which has no
- * `allowImportingTsExtensions`, so a `.ts`-suffixed import specifier fails
- * `tsc -b` with TS5097; dropping the suffix instead left Vite's
- * `configLoader: 'native'` warning on every invocation asking for one. A
- * plain `.js` file beside the config sidesteps both — the import specifier
- * carries its real extension (silencing the warning) without ever being a
- * `.ts` import (so TS5097 does not apply). See `singleFileBuild.d.ts` for the
- * type `vite.config.ts` and the unit test both get for free.
+ * Plain JS, not TypeScript (ESCSUITE-153 review round 1, NIT): when this was
+ * written, `tsconfig.node.json` had no `allowImportingTsExtensions`, so a
+ * `.ts`-suffixed import from `vite.config.ts` failed `tsc -b` with TS5097, and
+ * dropping the suffix left Vite's `configLoader: 'native'` warning on every
+ * invocation. A plain `.js` file beside the config sidestepped both.
+ * ESCSUITE-488 has since turned that option on (for `nodeTestSuites.ts`), so a
+ * `.ts` file would now work too; this one stays JS because nothing needs it
+ * moved. See `singleFileBuild.d.ts` for the type `vite.config.ts` and the unit
+ * test both get for free.
  *
  * @param {{ VITE_HEADLESS?: string, VITE_BUILD_MODE?: string }} env
  * @returns {boolean}
