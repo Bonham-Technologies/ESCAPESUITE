@@ -113,6 +113,15 @@ decodes both; the older headless shell (build 1194) preinstalled in some cloud c
 H.264/AAC decoder, so there only the WebM can be verified (`tests/media-health/av-fixture.spec.ts`
 runs both).
 
+**Frame-barcode fixtures.** `apps/e2e/fixtures/presented-frame/` holds VP8 sources whose every
+frame shows its own index as an 8-bit barcode, at 50 fps (`frame-barcode.webm`, every frame start
+on a whole millisecond) and 30 fps (`frame-barcode-30fps.webm`, every third start rounded a third
+of a millisecond late by the WebM timecode); its README has the ffmpeg command for each.
+`apps/e2e/utils/frameBarcode.ts` cuts the imported source into pieces through `LOAD_PROJECT`
+(`cutIntoPieces`), exports a WebM at project resolution and reads each exported frame's barcode
+back (`readBarcodes`, `wrongFrames`), so a spec can check every exported frame is the source frame
+the timeline puts there (`tests/regressions/ESCSUITE-454.spec.ts`, `ESCSUITE-495.spec.ts`).
+
 **Helpers** (`apps/e2e/utils/mediaHealth.ts`):
 
 | Helper | Fails unless |
