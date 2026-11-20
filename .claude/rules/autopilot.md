@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v34. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v37. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot policy
 
 This repository is on autopilot. Claude finds improvements, files them, builds them and
@@ -45,7 +45,7 @@ from .claude/rules/autopilot.md" means exactly that.
 | fleet | `.claude/autopilot/fleet.md`, with the steward's files |
 
 A bold section name that isn't in this file is in one of them:
-- **Steward**, **Watch tickets**, **Weekly digest** and **Decision Log**: `steward.md`;
+- **Steward**, **Watch tickets**, **Weekly digest**, **Decision Log** and **Decisions**: `steward.md`;
 - **Security sweep** and **Security tickets**: `security-sweep.md`;
 - **Record in Confluence**: `confluence-record.md`; **Control panel**: `control-panel.md`;
 - **Fleet digest** and **Policy tickets**: `fleet.md`;
@@ -73,7 +73,7 @@ Runs are scheduled tasks in cloud sessions. If the Atlassian tools aren't presen
 if they arrive, go on and put `Atlassian tools: late` in the summary. If not, write exactly `Atlassian tools: missing` as the summary's first line and stop; a steward leaves no digest (the fleet's missed run).
 
 - **Jira** (`bonham.atlassian.net`): the Atlassian connector only.
-- **Confluence** (`bonham.atlassian.net`, space `OPS`): the same Atlassian connector. Write only what **Record in Confluence**, **Decision Log** and the builder's
+- **Confluence** (`bonham.atlassian.net`, space `OPS`): the same Atlassian connector. Write only what **Record in Confluence**, **Decision Log**, **Decisions** and the builder's
   **Refresh** tickets in the role files allow, and the fleet role's **Status** section of "Autopilot control panel". Only the owner edits that page's **Settings**; no run does.
 - **GitHub**: `gh api` REST only. `gh pr …` and GraphQL (`gh api graphql`) are blocked in cloud sessions. In `gh api` paths, `{owner}` and `{repo}` fill in from the
   current repository; the only GitHub MCP tools allowed are `enable_pr_auto_merge` and `disable_pr_auto_merge` (builder step 6). The claude-code-remote tools `add_repo` and `register_repo_root` are allowed only as **Repo runs** say and, read-only, for the fleet role's inputs. The Claude GitHub App can't read security alerts, so the steward runs its own scanners (**Security sweep**).
@@ -141,6 +141,8 @@ It also applies if the reviewer or QC raises a concern it can't resolve.
 The ticket states the question, two or three options, and a recommendation. Every
 `ap-decision` ticket also gets the label `ap-asked` when it is filed, and keeps it after
 the owner relabels or closes it: that is how **Decision Log** finds answered questions.
+Every owner decision is recorded once with a scope (`company`, `all repos`, `lane:<lane>` or
+`repo:<name>`) on the OPS page "Decisions" and followed through (**Decisions**, `steward.md`).
 
 **`ap-watch`** if the work waits on something outside the repo: an upstream bug, a
 vendor release, a third-party deprecation. The ticket links the page to watch (a public
