@@ -1239,7 +1239,12 @@ describe('createFrameComposer seek wedge', () => {
     for (let i = 1; i <= MAX_LOGGED_SEEK_REQUESTS + 3; i++) await frame(composeFrame, i)
 
     expect(log).toHaveLength(MAX_LOGGED_SEEK_REQUESTS + 1)
-    expect(log[0].detail).toMatch(/^"slow\.webm" element 0, seek to 0\.0334 s: landed after \d+ ms \(seeking=false, readyState=4, wedged 0\/3\)$/)
+    expect(log[0].detail).toMatch(
+      new RegExp(
+        `^"slow\\.webm" element 0, seek to ${elementSeekTarget(1 / 30).toFixed(4)} s: landed after \\d+ ms ` +
+          `\\(seeking=false, readyState=4, wedged 0/3\\)$`
+      )
+    )
     expect(log[log.length - 1].detail).toBe(`Further slow seeks are not logged (the first ${MAX_LOGGED_SEEK_REQUESTS} are above)`)
   })
 

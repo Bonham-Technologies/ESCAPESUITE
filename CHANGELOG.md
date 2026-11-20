@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- ESCAPEARTIST: exports of a 30 fps WebM (an ESCAPECRAFT recording, say) no longer show the previous frame in place of every third frame: the in-page exporters now seek 1 ms past each frame's start, past WebM's millisecond-rounded frame times, instead of 0.1 ms (ESCSUITE-495).
 - ESCAPEARTIST: in Chrome and Edge, exporting asks where to save the video and writes it straight to that file as it encodes, and Save writes over the project file you opened or first saved instead of downloading another copy; File > Save Project As... picks a new file (ESCSUITE-470).
 - ESCAPEARTIST: Zoom to region: drag a box on the preview (or type it) and a video clip eases in to fill the frame with it at the playhead, holds, and eases back out, written as ordinary keyframes that one undo removes (ESCSUITE-475).
 - ESCAPEARTIST: a clip can play from 0.25× to 4× (the inspector's new Speed section): its length on the timeline follows, the clips after it move to match, linked parts change speed with it, and its sound plays pitched with the picture up to 2× and silent above, in the preview, every export and the headless render (ESCSUITE-471).

@@ -33,7 +33,8 @@
   (ESCSUITE-261); the `<video>` path's own seek-skip within 1/30 s, which repeated about every other frame, is fixed by
   ESCSUITE-263 (half a frame; the parity oracle is re-run for it); and its seek to a frame's exact start, which both
   Chromium and Firefox resolved to the previous frame on one start in three (their microsecond rounding), now goes
-  0.1 ms past it in the MP4, WebM and GIF element paths alike (`core/elementSeek.ts`, ESCSUITE-265). A worker killed outright, which may never fire `error`,
+  1 ms past it in the MP4, WebM and GIF element paths alike (`core/elementSeek.ts`, ESCSUITE-265; 0.1 ms until
+  ESCSUITE-495, which a WebM's millisecond timecodes defeated). A worker killed outright, which may never fire `error`,
   is caught by a 15 s main-thread deadline on each frame request (ESCSUITE-266). See `apps/artist/CLAUDE.md`'s
 
   (ESCSUITE-261); the `<video>` path's own seek-skip within 1/30 s can repeat a frame, and fixing it
