@@ -169,18 +169,18 @@ describe('sitemapEntries and buildSitemapXml (ESCSUITE-457)', () => {
 
   it('writes a sitemaps.org urlset, with lastmod only on dated entries', () => {
     const xml = buildSitemapXml([
-      { loc: 'https://www.escapesuite.io/' },
-      { loc: 'https://www.escapesuite.io/a?b=1&c=<2>', lastmod: '2026-10-01T12:00:00+02:00' },
+      { loc: 'https://escapesuite.io/' },
+      { loc: 'https://escapesuite.io/a?b=1&c=<2>', lastmod: '2026-10-01T12:00:00+02:00' },
     ])
     expect(xml).toBe(
       [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
         '  <url>',
-        '    <loc>https://www.escapesuite.io/</loc>',
+        '    <loc>https://escapesuite.io/</loc>',
         '  </url>',
         '  <url>',
-        '    <loc>https://www.escapesuite.io/a?b=1&amp;c=&lt;2&gt;</loc>',
+        '    <loc>https://escapesuite.io/a?b=1&amp;c=&lt;2&gt;</loc>',
         '    <lastmod>2026-10-01T12:00:00+02:00</lastmod>',
         '  </url>',
         '</urlset>',
@@ -193,12 +193,12 @@ describe('sitemapEntries and buildSitemapXml (ESCSUITE-457)', () => {
     const xml = buildSitemapXml(sitemapEntries(() => null))
     const locs = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => m[1])
     expect(locs).toEqual([
-      'https://www.escapesuite.io/',
-      'https://www.escapesuite.io/privacy',
-      'https://www.escapesuite.io/terms',
-      'https://www.escapesuite.io/limitations',
-      'https://www.escapesuite.io/craft/',
-      'https://www.escapesuite.io/artist/',
+      'https://escapesuite.io/',
+      'https://escapesuite.io/privacy',
+      'https://escapesuite.io/terms',
+      'https://escapesuite.io/limitations',
+      'https://escapesuite.io/craft/',
+      'https://escapesuite.io/artist/',
     ])
     expect(xml).not.toContain('<lastmod>')
   })

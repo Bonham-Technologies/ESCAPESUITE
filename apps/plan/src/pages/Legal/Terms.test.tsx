@@ -11,7 +11,7 @@ describe('Terms', () => {
     render(<Terms />)
     expect(document.title).toBe('Terms of Service — ESCAPE Suite')
     const canonical = document.head.querySelector('link[rel="canonical"]')
-    expect(canonical).toHaveAttribute('href', 'https://www.escapesuite.io/terms')
+    expect(canonical).toHaveAttribute('href', 'https://escapesuite.io/terms')
   })
 
   it('links to the Privacy Policy', () => {

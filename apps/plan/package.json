@@ -6,7 +6,7 @@
   "author": "Bonham Technologies, LLC",
   "license": "Apache-2.0",
   "type": "module",
-  "homepage": "https://www.escapesuite.io",
+  "homepage": "https://escapesuite.io",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

@@ -120,9 +120,9 @@ describe('bootstrapApp', () => {
     expect(
       (beforeSend as BeforeSend)({
         type: 'pageview',
-        url: 'https://www.escapesuite.io/artist/?video=https%3A%2F%2Fh.example%2Fv.mp4&title=secret&project=eyJ9',
+        url: 'https://escapesuite.io/artist/?video=https%3A%2F%2Fh.example%2Fv.mp4&title=secret&project=eyJ9',
       })
-    ).toEqual({ type: 'pageview', url: 'https://www.escapesuite.io/artist/' })
+    ).toEqual({ type: 'pageview', url: 'https://escapesuite.io/artist/' })
   })
 
   it('does not mount Analytics in standalone build mode', async () => {
