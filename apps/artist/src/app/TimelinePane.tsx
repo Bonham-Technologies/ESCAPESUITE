@@ -1,6 +1,7 @@
 import { Timeline } from '../components/Timeline/Timeline';
 import type { TimeRange } from '../components/Timeline/timelineGeometry';
 import { TranscribeControl } from '../components/Timeline/TranscribeControl';
+import { TranslateControl } from '../components/Timeline/TranslateControl';
 import type { ShowNotification } from './useNotification';
 import styles from '../App.module.css';
 
@@ -30,7 +31,8 @@ interface TimelinePaneProps {
 /**
  * The bottom pane: the timeline's own controls (add track, zoom out, the zoom
  * readout, zoom in, and — only where the browser can recognise speech on this
- * device — "Transcribe to captions") above the timeline itself.
+ * device — "Transcribe to captions", and where it can translate on this device,
+ * "Translate captions") above the timeline itself.
  *
  * Deliberately not memoised — `App.rerender.test.tsx` counts how often
  * `Timeline` renders, and a memo here would make that pass for the wrong
@@ -76,6 +78,8 @@ export function TimelinePane({
           </svg>
         </button>
         <TranscribeControl showNotification={showNotification} onDialogOpenChange={onTranscribeDialogOpenChange} />
+        {/* ESCSUITE-473: only where the browser can translate on this device. */}
+        <TranslateControl showNotification={showNotification} />
       </div>
       <Timeline onExportSelection={onExportSelection} />
     </footer>

@@ -65,6 +65,7 @@ one and list it here). Don't add narrative, ticket history or measurements to th
 | Overlay System | [`overlay-system.md`](docs/reference/overlay-system.md) |
 | Captions (`src/core/captions.ts`, ESCSUITE-293) and the export dialog's YouTube chapters (`src/utils/youtubeChapters.ts`, ESCSUITE-472) | [`captions.md`](docs/reference/captions.md) |
 | On-device transcription (`src/core/transcribe.ts`, `src/core/speechRecognitionLocal.ts`, ESCSUITE-404) | [`on-device-transcription.md`](docs/reference/on-device-transcription.md) |
+| On-device caption translation (`src/components/Timeline/TranslateControl.tsx`, `src/core/translatorLocal.ts`, ESCSUITE-473) | [`on-device-translation.md`](docs/reference/on-device-translation.md) |
 | Keyframe Animation System (`src/utils/animation.ts`) | [`keyframe-animation-system.md`](docs/reference/keyframe-animation-system.md) |
 | Keyframe Panel (`src/components/KeyframePanel/`) | [`keyframe-panel.md`](docs/reference/keyframe-panel.md) |
 | Zoom to region (`src/utils/zoomToRegion.ts`, `src/components/Preview/ZoomRegion.tsx`, ESCSUITE-475) | [`zoom-to-region.md`](docs/reference/zoom-to-region.md) |
