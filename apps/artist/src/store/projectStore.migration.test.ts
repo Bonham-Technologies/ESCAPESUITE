@@ -495,6 +495,56 @@ describe('parseProject (ESCSUITE-102)', () => {
     })
   })
 
+  // ESCSUITE-473: a caption track's language, an optional, additive field.
+  // A file written before it has none and opens unchanged; a file that has it
+  // keeps it through every load.
+  describe('a caption track\'s language (ESCSUITE-473)', () => {
+    const withTracks = (...extra: Record<string, unknown>[]) => {
+      const project = validProject() as unknown as { timeline: { tracks: Record<string, unknown>[] } }
+      project.timeline.tracks = [project.timeline.tracks[0], ...extra]
+      return project
+    }
+    const captions = (id: string, index: number, more: Record<string, unknown> = {}) => ({
+      id, name: 'Captions', index, visible: true, locked: false, muted: false, volume: 1, height: 60, kind: 'captions', ...more,
+    })
+
+    it('opens a file from before the field unchanged: no track gains a language', () => {
+      const before = withTracks(captions('t2', 1))
+      const result = parseProject(structuredClone(before))
+      expect(result.ok).toBe(true)
+      if (!result.ok) return
+      expect(result.project.timeline.tracks.map((track) => 'language' in track)).toEqual([false, false])
+      expect(result.project.timeline.tracks[1]).toEqual(before.timeline.tracks[1])
+    })
+
+    it('keeps two caption tracks and their languages, as written, through the load', () => {
+      const result = parseProject(withTracks(captions('t2', 2, { language: 'en-US' }), captions('t3', 1, { language: 'es', name: 'Captions (Spanish)' })))
+      expect(result.ok && result.project.timeline.tracks.map((track) => [track.id, track.kind, track.language, track.index])).toEqual([
+        ['t1', undefined, undefined, 0],
+        ['t2', 'captions', 'en-US', 2],
+        ['t3', 'captions', 'es', 1],
+      ])
+    })
+
+    it.each(['zh-Hant-TW', 'sr-Latn-RS', 'es-419', 'yue', 'en-GB-oxendict', 'EN-us'])('accepts the well-formed tag %s, kept as written', (language) => {
+      const result = parseProject(withTracks(captions('t2', 1, { language })))
+      expect(result.ok && result.project.timeline.tracks[1].language).toBe(language)
+    })
+
+    it.each([
+      ['a number', 1],
+      ['null', null],
+      ['an empty string', ''],
+      ['not a tag', 'not a language!'],
+      ['an object', { tag: 'en' }],
+    ])('refuses a language that is %s, by name', (_label, language) => {
+      expect(parseProject(withTracks(captions('t2', 1, { language })))).toEqual({
+        ok: false,
+        reason: 'timeline.tracks[1].language must be a BCP 47 language tag',
+      })
+    })
+  })
+
   it('migrates a project with no tracks at all, rather than rejecting it', () => {
     // ensureTimelineHasTracks's own migration branch handles an absent/empty
     // `tracks` array — parseProject must let that through, not reject it.

@@ -113,6 +113,28 @@ test('the CSP allows no Vercel preview-toolbar host (ESCSUITE-459)', () => {
   assert.match(policy.get('script-src') ?? '', /(^| )blob:( |$)/);
 });
 
+test('the CSP lets each app load its own service worker and web manifest (ESCSUITE-469)', () => {
+  const policy = parseCsp(siteWideHeaders().get('content-security-policy') ?? '');
+  // 'self' covers /sw.js, /craft/sw.js and /artist/sw.js; blob: stays for the
+  // apps' own blob-URL workers.
+  assert.equal(policy.get('worker-src'), "'self' blob:");
+  assert.equal(policy.get('manifest-src'), "'self'");
+});
+
+test('each app\'s service worker is served no-cache, never as an immutable asset (ESCSUITE-469)', () => {
+  for (const source of ['/sw.js', '/craft/sw.js', '/artist/sw.js']) {
+    const entries = vercelConfig.headers.filter((h) => h.source === source);
+    assert.equal(entries.length, 1, `vercel.json has no headers entry for ${source}`);
+    const cacheControl = entries[0].headers.find(({ key }) => key.toLowerCase() === 'cache-control');
+    assert.equal(cacheControl?.value, 'no-cache', `${source} should be revalidated on every update check`);
+    // No scope wider than the worker's own directory, so no Service-Worker-Allowed.
+    assert.ok(
+      !entries[0].headers.some(({ key }) => key.toLowerCase() === 'service-worker-allowed'),
+      `${source} needs no Service-Worker-Allowed header`
+    );
+  }
+});
+
 test('every page sends Strict-Transport-Security with includeSubDomains, no preload (ESCSUITE-459)', () => {
   assert.equal(
     siteWideHeaders().get('strict-transport-security'),

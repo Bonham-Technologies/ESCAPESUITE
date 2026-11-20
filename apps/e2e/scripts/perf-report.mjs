@@ -49,6 +49,7 @@ const ORDER = [
   'craft-separate-tracks-recording',
   'craft-mp4-conversion',
   'craft-composite-mp4-conversion',
+  'craft-take-memory',
   'headless-kit-render',
 ]
 
@@ -106,6 +107,12 @@ const METRICS = {
   encoderQueueHighWater: { label: 'Encoder queue high-water' },
   heapDeltaBytes: { label: 'Heap delta', bytes: true },
   outputBytes: { label: 'Output size', bytes: true },
+  sampleEverySeconds: { label: 'Sampled every', unit: 's' },
+  keptMemoryBytesPerSecond: { label: 'Memory growth/s, take kept on the device', bytes: true },
+  keptMemoryGrowthBytes: { label: 'Memory growth over the take, kept on the device', bytes: true },
+  diskBytesPerSecond: { label: 'Take bytes written to the device/s', bytes: true },
+  inMemoryMemoryBytesPerSecond: { label: 'Memory growth/s, take in memory', bytes: true },
+  inMemoryMemoryGrowthBytes: { label: 'Memory growth over the take, in memory', bytes: true },
   ...gestureMetrics('clipDrag', 'Clip drag'),
   ...gestureMetrics('marquee', 'Marquee'),
   ...gestureMetrics('playheadScrub', 'Playhead scrub'),
