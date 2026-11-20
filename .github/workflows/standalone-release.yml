@@ -14,6 +14,11 @@ concurrency:
   group: standalone-release-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: false
 
+# Read-only by default (ESCSUITE-476). Every job below replaces this with its own
+# block; only `release` can write contents or mint attestations.
+permissions:
+  contents: read
+
 jobs:
   # Prepare artifacts from CI workflow
   prepare:
@@ -37,24 +42,27 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Check if PR or push
         id: check
+        env:
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
         run: |
-          if [ "${{ github.event.workflow_run.event }}" = "pull_request" ]; then
+          if [ "$RUN_EVENT" = "pull_request" ]; then
             echo "is_pr=true" >> $GITHUB_OUTPUT
-            # Extract PR number from the workflow run
-            echo "pr_number=${{ github.event.workflow_run.pull_requests[0].number }}" >> $GITHUB_OUTPUT
+            # The PR number from the workflow run (empty for a fork's PR)
+            echo "pr_number=${PR_NUMBER}" >> $GITHUB_OUTPUT
           else
             echo "is_pr=false" >> $GITHUB_OUTPUT
             echo "pr_number=" >> $GITHUB_OUTPUT
           fi
 
       - name: Download standalone artifacts from CI
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: standalone-builds
           path: ./artifacts
@@ -62,7 +70,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download headless-artist kit from CI
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: false
         with:
           name: headless-artist-kit
@@ -72,7 +80,12 @@ jobs:
 
       - name: Determine version
         id: version
+        env:
+          IS_PR: ${{ steps.check.outputs.is_pr }}
+          PR_NUMBER: ${{ steps.check.outputs.pr_number }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
+          set -euo pipefail
           # The umbrella release is named after the HIGHER of the two app
           # versions, not ESCAPECRAFT's. An artist-only bump used to leave the
           # tag unchanged, so no new release was cut and `latest` kept pointing
@@ -86,6 +99,16 @@ jobs:
             const [a, b] = [parts(craft), parts(artist)];
             ((a[0] - b[0]) || (a[1] - b[1]) || (a[2] - b[2])) >= 0 ? craft : artist;
           ")
+          # The versions come from the checked-out commit's package.json files, which a
+          # pull request (perhaps a fork's) controls. They name files below and are
+          # written to GITHUB_OUTPUT, so anything but a plain version stops the run
+          # (ESCSUITE-476).
+          for v in "$CRAFT_VERSION" "$ARTIST_VERSION" "$BASE_VERSION"; do
+            if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::'$v' is not a plain version"
+              exit 1
+            fi
+          done
           # PR builds are previews, so every name carries the PR suffix; a push
           # to main leaves the names as the bare versions the per-package
           # releases in release.yml use.
@@ -94,24 +117,27 @@ jobs:
           # preview built from one is named by its commit instead of with a bare
           # `-pr` (ESCSUITE-134).
           SUFFIX=""
-          if [ "${{ steps.check.outputs.is_pr }}" = "true" ]; then
-            PR_NUMBER="${{ steps.check.outputs.pr_number }}"
+          if [ "$IS_PR" = "true" ]; then
             if [ -n "$PR_NUMBER" ]; then
               SUFFIX="-pr${PR_NUMBER}"
             else
-              SUFFIX="-${{ github.event.workflow_run.head_sha }}"
+              SUFFIX="-${HEAD_SHA}"
               SUFFIX="${SUFFIX:0:8}"
             fi
           fi
-          echo "version=${BASE_VERSION}${SUFFIX}" >> $GITHUB_OUTPUT
-          echo "craft_version=${CRAFT_VERSION}${SUFFIX}" >> $GITHUB_OUTPUT
-          echo "artist_version=${ARTIST_VERSION}${SUFFIX}" >> $GITHUB_OUTPUT
+          echo "version=${BASE_VERSION}${SUFFIX}" >> "$GITHUB_OUTPUT"
+          echo "craft_version=${CRAFT_VERSION}${SUFFIX}" >> "$GITHUB_OUTPUT"
+          echo "artist_version=${ARTIST_VERSION}${SUFFIX}" >> "$GITHUB_OUTPUT"
           echo "Umbrella version: ${BASE_VERSION}${SUFFIX}"
           echo "ESCAPECRAFT version: ${CRAFT_VERSION}${SUFFIX}"
           echo "ESCAPEARTIST version: ${ARTIST_VERSION}${SUFFIX}"
 
       - name: Get file sizes and prepare release artifacts
         id: sizes
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          CRAFT_VERSION: ${{ steps.version.outputs.craft_version }}
+          ARTIST_VERSION: ${{ steps.version.outputs.artist_version }}
         run: |
           # Move artifacts to expected structure
           mkdir -p dist/craft dist/artist dist/kit
@@ -133,10 +159,6 @@ jobs:
             echo "Error: Could not find headless-artist kit tarball"
             exit 1
           fi
-
-          VERSION="${{ steps.version.outputs.version }}"
-          CRAFT_VERSION="${{ steps.version.outputs.craft_version }}"
-          ARTIST_VERSION="${{ steps.version.outputs.artist_version }}"
 
           # Copy to versioned names. Each HTML build carries its own app's
           # version — the same name release.yml attaches to that package's own
@@ -172,7 +194,7 @@ jobs:
 
       - name: Setup Node.js
         if: steps.check.outputs.is_pr == 'false' && github.event.workflow_run.head_branch == 'main'
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: 'pnpm'
@@ -196,7 +218,7 @@ jobs:
           node scripts/generate-sbom.mjs --build "dist/kit/escapesuite-headless-artist-${VERSION}.tgz" --package @escapesuite/headless-artist --package @escapesuite/artist --output "dist/kit/escapesuite-headless-artist-${VERSION}.spdx.json"
 
       - name: Upload release artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: standalone-release
           path: dist/
@@ -215,16 +237,26 @@ jobs:
 
     steps:
       - name: Comment on PR
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        # Through env, not `${{ }}` in the script: the versions come from the PR's
+        # own package.json files, so their text must stay data (ESCSUITE-476).
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CRAFT_VERSION: ${{ needs.prepare.outputs.craft_version }}
+          ARTIST_VERSION: ${{ needs.prepare.outputs.artist_version }}
+          CRAFT_SIZE: ${{ needs.prepare.outputs.craft_size }}
+          ARTIST_SIZE: ${{ needs.prepare.outputs.artist_size }}
+          KIT_SIZE: ${{ needs.prepare.outputs.kit_size }}
+          PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
         with:
           script: |
-            const version = '${{ needs.prepare.outputs.version }}';
-            const craftVersion = '${{ needs.prepare.outputs.craft_version }}';
-            const artistVersion = '${{ needs.prepare.outputs.artist_version }}';
-            const craftSize = '${{ needs.prepare.outputs.craft_size }}';
-            const artistSize = '${{ needs.prepare.outputs.artist_size }}';
-            const kitSize = '${{ needs.prepare.outputs.kit_size }}';
-            const prNumber = '${{ needs.prepare.outputs.pr_number }}';
+            const version = process.env.VERSION;
+            const craftVersion = process.env.CRAFT_VERSION;
+            const artistVersion = process.env.ARTIST_VERSION;
+            const craftSize = process.env.CRAFT_SIZE;
+            const artistSize = process.env.ARTIST_SIZE;
+            const kitSize = process.env.KIT_SIZE;
+            const prNumber = process.env.PR_NUMBER;
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             const body = [
@@ -252,8 +284,10 @@ jobs:
   release:
     name: Create GitHub Release
     needs: prepare
-    # Release only for a push to main (never for PR builds or dev pushes)
-    if: needs.prepare.outputs.is_pr == 'false' && github.event.workflow_run.head_branch == 'main'
+    # Release only for a push to main (never for PR builds or dev pushes). is_pr is
+    # true only for a `pull_request` run, so the event is checked by name as well: a
+    # CI run from `pull_request_target` must never publish (ESCSUITE-476).
+    if: needs.prepare.outputs.is_pr == 'false' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # contents: write creates the release. id-token and attestations sign and
@@ -270,7 +304,7 @@ jobs:
 
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: standalone-release
           path: ./dist
@@ -420,7 +454,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
 

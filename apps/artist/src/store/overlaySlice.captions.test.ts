@@ -226,3 +226,131 @@ describe('addCaptionCues (ESCSUITE-293)', () => {
     })
   })
 })
+
+// ESCSUITE-473: a caption track says what language it is in.
+describe('addCaptionCues with a language (ESCSUITE-473)', () => {
+  const captionTrack = () => state().project.timeline.tracks.find((track) => track.kind === 'captions')!
+
+  it('marks a new caption track with it, and an import without one leaves the track unmarked', () => {
+    state().addCaptionCues(cues, style)
+    expect('language' in captionTrack()).toBe(false)
+    state().resetProject()
+    state().addCaptionCues(cues, style, { language: 'en-US' })
+    expect(captionTrack().language).toBe('en-US')
+  })
+
+  it('names an unmarked track on an add, keeps a marked one on an add, and takes the new one on a replace', () => {
+    state().addCaptionCues(cues, style)
+    state().addCaptionCues(cues, style, { language: 'de-DE' })
+    expect(captionTrack().language).toBe('de-DE')
+    state().addCaptionCues(cues, style, { language: 'fr-FR' })
+    expect(captionTrack().language).toBe('de-DE')
+    state().addCaptionCues(cues, style, { language: 'fr-FR', replace: true })
+    expect(captionTrack().language).toBe('fr-FR')
+    state().undo()
+    expect(captionTrack().language).toBe('de-DE')
+  })
+})
+
+describe('addCaptionTranslation (ESCSUITE-473)', () => {
+  const setup = () => {
+    const { trackId } = state().addCaptionCues(
+      [
+        { start: 1.234567, end: 2.5, text: 'Hello there.' },
+        { start: 3, end: 4.000001, text: 'Two lines\nof text.' },
+      ],
+      style,
+      { language: 'en-US' }
+    )!
+    const source = state().project.timeline.clips.filter((clip) => clip.trackId === trackId)
+    useEditorStore.setState({ history: { past: [], future: [] } })
+    return { trackId, source }
+  }
+
+  it('adds a second caption track, marked with its language, whose cues keep the source times exactly', () => {
+    const { trackId, source } = setup()
+    const result = state().addCaptionTranslation(
+      trackId,
+      source.map((clip, i) => ({ clipId: clip.id, text: ['Hola.', 'Dos líneas\nde texto.'][i] })),
+      { language: 'es', trackName: 'Captions (Spanish)' }
+    )!
+    const tracks = state().project.timeline.tracks
+    const translation = tracks.find((track) => track.id === result.trackId)!
+    expect(result.added).toBe(2)
+    expect(translation).toMatchObject({ kind: 'captions', language: 'es', name: 'Captions (Spanish)', visible: true, locked: false })
+    const added = state().project.timeline.clips.filter((clip) => clip.trackId === result.trackId)
+    expect(added.map((clip) => [clip.timelinePosition, clip.duration, clip.startTime, clip.endTime])).toEqual(
+      source.map((clip) => [clip.timelinePosition, clip.duration, clip.startTime, clip.endTime])
+    )
+    expect(added.map((clip) => clip.textData!.text)).toEqual(['Hola.', 'Dos líneas\nde texto.'])
+    expect(added.map((clip) => clip.name)).toEqual(['Hola.', 'Dos líneas\nde texto.'])
+    // The source's style carries over; only the words change.
+    expect({ ...added[0].textData, text: '' }).toEqual({ ...source[0].textData, text: '' })
+    expect(added.every((clip) => !source.some((s) => s.id === clip.id))).toBe(true)
+    // The source is untouched, and still the first caption track (the one imports and transcription use).
+    expect(state().project.timeline.clips.filter((clip) => clip.trackId === trackId)).toEqual(source)
+    expect(tracks.find((track) => track.kind === 'captions')!.id).toBe(trackId)
+  })
+
+  it('goes directly below the source in the timeline, moving every track from the source up', () => {
+    state().addTrack('Above')
+    const before = state().project.timeline.tracks
+    const { trackId, source } = setup()
+    const sourceIndex = state().project.timeline.tracks.find((track) => track.id === trackId)!.index
+    const { trackId: translationId } = state().addCaptionTranslation(trackId, [{ clipId: source[0].id, text: 'Hola.' }], {
+      language: 'es',
+      trackName: 'Captions (Spanish)',
+    })!
+    const tracks = state().project.timeline.tracks
+    const index = (id: string) => tracks.find((track) => track.id === id)!.index
+    expect(index(translationId)).toBe(sourceIndex)
+    expect(index(trackId)).toBe(sourceIndex + 1)
+    for (const track of before) expect(index(track.id)).toBe(track.index)
+    expect(new Set(tracks.map((track) => track.index)).size).toBe(tracks.length)
+  })
+
+  it('is one undo step, and leaves the selection where it was', () => {
+    const { trackId, source } = setup()
+    useEditorStore.setState({ selectedClipId: source[0].id })
+    const before = state().project
+    state().addCaptionTranslation(trackId, source.map((clip) => ({ clipId: clip.id, text: 'x' })), {
+      language: 'es',
+      trackName: 'Captions (Spanish)',
+      sourceLanguage: 'en',
+    })
+    expect(state().history.past).toHaveLength(1)
+    expect(state().selectedClipId).toBe(source[0].id)
+    state().undo()
+    expect(state().project.timeline).toEqual(before.timeline)
+  })
+
+  it('writes a confirmed source language to the source track, unless it is locked', () => {
+    state().addCaptionCues(cues, style)
+    const source = state().project.timeline.tracks.find((track) => track.kind === 'captions')!
+    const clip = state().project.timeline.clips.find((c) => c.trackId === source.id)!
+    state().addCaptionTranslation(source.id, [{ clipId: clip.id, text: 'Hola' }], { language: 'es', trackName: 'S', sourceLanguage: 'en' })
+    expect(state().project.timeline.tracks.find((track) => track.id === source.id)!.language).toBe('en')
+
+    state().resetProject()
+    state().addCaptionCues(cues, style)
+    const locked = state().project.timeline.tracks.find((track) => track.kind === 'captions')!
+    const lockedClip = state().project.timeline.clips.find((c) => c.trackId === locked.id)!
+    state().updateTrack(locked.id, { locked: true })
+    const result = state().addCaptionTranslation(locked.id, [{ clipId: lockedClip.id, text: 'Hola' }], {
+      language: 'es',
+      trackName: 'S',
+      sourceLanguage: 'en',
+    })
+    // A locked source still gets its translation (a new track); only its own marker is left alone.
+    expect(result?.added).toBe(1)
+    expect('language' in state().project.timeline.tracks.find((track) => track.id === locked.id)!).toBe(false)
+  })
+
+  it('writes nothing when the source track is gone or none of the named clips is on it', () => {
+    const { trackId } = setup()
+    expect(state().addCaptionTranslation('no-such-track', [], { language: 'es', trackName: 'S' })).toBeNull()
+    expect(state().addCaptionTranslation(trackId, [{ clipId: 'gone', text: 'x' }], { language: 'es', trackName: 'S' })).toBeNull()
+    expect(state().history.past).toHaveLength(0)
+    expect(state().project.timeline.tracks.filter((track) => track.kind === 'captions')).toHaveLength(1)
+  })
+})

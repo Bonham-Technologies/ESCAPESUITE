@@ -31,6 +31,8 @@ export interface RecorderDouble {
   readonly hasVideoSource: boolean
   /** Whether the take records the webcam as its own file. */
   readonly separateTracks: boolean
+  /** The take store handed to the factory (ESCSUITE-466), or null. */
+  readonly takeStore: unknown
   /** Arguments of every initialize() call, oldest first. */
   readonly initializeCalls: InitializeCall[]
   readonly initialize: ReturnType<typeof vi.fn>
@@ -67,7 +69,8 @@ function createRecorderDouble(
   callbacks: RecorderCallbacksLike,
   isPiP: boolean,
   hasVideoSource: boolean,
-  separateTracks: boolean
+  separateTracks: boolean,
+  takeStore: unknown
 ): RecorderDouble {
   let recording = false
   let paused = false
@@ -77,6 +80,7 @@ function createRecorderDouble(
     isPiP,
     hasVideoSource,
     separateTracks,
+    takeStore,
     initializeCalls: [],
     stopBlob: new Blob(['recorded-bytes'], { type: 'video/webm' }),
     companionParts: null,
@@ -198,9 +202,10 @@ export function createRecorderFactoryDouble(): RecorderFactoryDouble {
       callbacks: RecorderCallbacksLike,
       isPiP: boolean = false,
       hasVideoSource: boolean = true,
-      separateTracks: boolean = false
+      separateTracks: boolean = false,
+      takeStore: unknown = null
     ) => {
-      const recorder = createRecorderDouble(callbacks, isPiP, hasVideoSource, separateTracks)
+      const recorder = createRecorderDouble(callbacks, isPiP, hasVideoSource, separateTracks, takeStore)
       recorder.initializeError = factory.nextInitializeError
       factory.nextInitializeError = null
       recorder.initializeGate = factory.nextInitializeGate

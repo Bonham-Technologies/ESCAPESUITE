@@ -294,7 +294,8 @@ export function TranscribeControl({ showNotification, onDialogOpenChange }: Tran
       const result = addCaptionCues(
         cues.map((cue) => ({ ...cue, text: wrapCaptionText(cue.text, columns) })),
         style,
-        { replace: replace && cut ? { before: cut.stoppedAt } : replace }
+        // ESCSUITE-473: the track says what language it is in, for "Translate captions" and the sidecar's name.
+        { replace: replace && cut ? { before: cut.stoppedAt } : replace, language: lang }
       );
       if (!result) {
         const locked = 'The Captions track is locked, so no captions were added.';

@@ -93,6 +93,22 @@ export const LIMITATIONS: Limitation[] = [
     ],
   },
   {
+    id: 'unfinished-recordings',
+    title: 'Recovering an unfinished recording: what it needs and what it can lose',
+    body: [
+      'ESCAPECRAFT keeps each recording on your device while it records, in the browser’s private storage for the site. If the tab closes or crashes, or the recording ends in an error before it is saved, ESCAPECRAFT offers it back the next time you open it. You can then recover what was recorded into your library, or discard it.',
+      'A recovered recording can be missing its last few seconds. The recording is written to the device about once a second and made safe on disk every 2 seconds, so a tab that closes or crashes can lose the last second or so, and a power cut or computer crash a little more.',
+      'It needs a browser that lets the page write to the site’s private storage from the background. Where it cannot, for example in some private windows or when ESCAPECRAFT is opened as a file on your computer, ESCAPECRAFT records in memory as before and says the recording is not protected if the tab closes. The same applies in a browser whose built-in recorder writes MP4 rather than WebM, such as older versions of Safari, to a recording of the screen with the webcam overlaid on it and to a sound-only recording: only WebM can be recovered.',
+      'While a recording is being saved it briefly takes about twice its size in storage: the copy kept while recording is deleted once the recording is in your library. If storage runs out during a recording, ESCAPECRAFT says so. Depending on the kind of recording, it either stops and keeps what was recorded, or keeps recording in memory without this protection. Recovering a recording needs about its size free in storage again, so free up some space first.',
+      'Clearing your browser’s data for the site deletes an unfinished recording too. Nothing is uploaded: the copy stays on your device.',
+    ],
+    sources: [
+      repoFile('apps/craft/docs/reference/crash-safe-takes.md'),
+      repoFile('apps/craft/src/core/takeStore.ts'),
+      ticket('ESCSUITE-466'),
+    ],
+  },
+  {
     id: 'safari-seven-day-eviction',
     title: 'Safari can delete stored recordings and projects after seven days away',
     body: [
@@ -131,6 +147,20 @@ export const LIMITATIONS: Limitation[] = [
     ],
   },
   {
+    id: 'translate-captions',
+    title: 'Translate captions: only where the browser has on-device translation',
+    body: [
+      'ESCAPEARTIST’s Translate captions uses your browser’s own on-device translation, so the button appears only where the browser has it. Today that means Chrome on a computer, from version 138; another browser shows it once it has the same feature. Phones do not have it, and Chromium-based apps that do not identify as Chrome, Edge, Opera or Brave never show it. It translates the captions into a second caption track in the language you pick, with the same timing; you can show, hide and export each language on its own.',
+      'The first time you translate between two languages, your browser may download a translation model for that pair. ESCAPEARTIST asks first, with a notice that names both languages, such as “Your browser will download a translation model for English to Spanish once. Your captions never leave this device.” Nothing is downloaded until you confirm, and Cancel downloads nothing. The browser downloads the model itself, from wherever its maker provides it (Chrome gets it from Google). ESCAPEARTIST does not choose, see or pass on that download. Translating makes no network request of its own: ESCAPEARTIST downloads nothing for it and sends no captions anywhere.',
+      'Without a network, translation works only if the model for that pair of languages is already installed in that browser profile.',
+    ],
+    sources: [
+      repoFile('apps/artist/docs/reference/on-device-translation.md'),
+      repoFile('apps/artist/src/core/translatorLocal.ts'),
+      ticket('ESCSUITE-473'),
+    ],
+  },
+  {
     id: 'float-controls',
     title: 'Float controls: not in every browser, and not when embedded',
     body: [
@@ -157,14 +187,25 @@ export const LIMITATIONS: Limitation[] = [
     sources: [{ label: 'Owner ruling, 2026-10-01' }],
   },
   {
+    id: 'hosted-offline',
+    title: 'The hosted site works offline after the first visit, app by app',
+    body: [
+      'On escapesuite.io, each app works offline after the first visit. Open the hub, ESCAPECRAFT or ESCAPEARTIST once while you are online and let it finish loading; after that, it opens and works with no connection, recording, editing and exporting included. Each app is saved on its own, so open each one you want while you are online.',
+      'It needs a browser with service workers, which current versions of Chrome, Edge, Firefox and Safari have. A private window may not keep the saved copy, or may not allow it at all. The browser may also discard the saved copy, for example when the device runs low on space, or in Safari after about seven days without a visit; open the app online again to save it again.',
+      'The saved copy is the app itself. Your recordings, imported files and projects are stored in the browser as before, not by this feature. When a new version is published, the app saves it the next time you open it online, and shows a short “Updated” note.',
+      'An app shown inside another page (in an iframe) does not save itself for offline use. The offline build from the Releases page needs no first visit at all.',
+    ],
+    sources: [repoFile('docs/reference/vercel-deployment.md'), repoFile('scripts/offline.mjs'), ticket('ESCSUITE-469')],
+  },
+  {
     id: 'hosted-analytics',
     title: 'What the hosted site sends',
     body: [
-      'The hosted site (www.escapesuite.io) uses Vercel Web Analytics. Our code sends two kinds of record: a page view when a page opens, and a named event when you do certain things, such as “Recording Started”, “Export Completed” or “Tool Launched”.',
+      'The hosted site (escapesuite.io) uses Vercel Web Analytics. Our code sends two kinds of record: a page view when a page opens, and a named event when you do certain things, such as “Recording Started”, “Export Completed” or “Tool Launched”.',
       'Every record includes the path of the page you are on, such as /artist/, and never the part of the address after a ? or #. If you came from another site, or another site shows the app inside its own page, the record also includes that site’s address. Browsers normally shorten it to just the site’s name, such as https://example.com/, unless that site asks for more. Vercel also works out your browser, operating system, device type and approximate location (down to the city) from the request itself.',
       'An event adds at most a few short labels and numbers: which tool, which export format, a length in whole seconds, a media type (video, image or audio), and for a failed export its error type and how far it got. Nothing you record, import, type or export is sent, and neither are file names.',
       'A website that embeds ESCAPECRAFT or ESCAPEARTIST in its own page can put its own address, a video’s address, a title, a whole project or a window name into the app’s address after a ?. None of that is sent, and neither is the random ID ESCAPECRAFT adds when it hands a recording to ESCAPEARTIST.',
-      'Both kinds of record go to /_vercel/insights/ on www.escapesuite.io itself, not to another site. Our code sets no cookies.',
+      'Both kinds of record go to /_vercel/insights/ on escapesuite.io itself, not to another site. Our code sets no cookies.',
       'The offline build contains no analytics code at all. It makes no network requests unless you give ESCAPEARTIST a video address to load, and then it fetches only that address.',
     ],
     sources: [

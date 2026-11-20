@@ -88,3 +88,13 @@
   head is the `.buffer` of a pooled `Buffer`, which a browser's `buffer` polyfill never pools. The
   same specs also read the stored take's Cues in the page: present, non-empty, and one CuePoint per
   video keyframe found walking its clusters
+
+## Recovering a take that never finished (ESCSUITE-466)
+
+A take kept on the device can stop anywhere. A MediaRecorder stream can stop mid-block. A
+Mediabunny file can stop before `finalize()`, with a header-only Segment size, Duration 0 and
+no Cues. `core/webmTrim.ts`'s `trimToWholeBlocks` cuts either back to its last whole block and
+rewrites the Segment as unknown-size, 8 bytes wide. It rewrites a cut known-size Cluster's size
+as "unknown" at the same width, and drops anything after the Clusters. The result is the shape
+`fixWebMMetadata` already repairs, so recovery runs that same repair. See
+[`crash-safe-takes.md`](crash-safe-takes.md).
