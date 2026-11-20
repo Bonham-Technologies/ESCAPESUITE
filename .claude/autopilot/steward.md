@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v34. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v37. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: steward role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -167,7 +167,7 @@ For each one:
 
 1. The Decision Log page, found before the digest:
    `space = OPS AND type = page AND title = "ESCAPESUITE — Decision Log"`.
-2. **Skip it if it's already recorded:** the ticket has a comment starting
+2. **Skip steps 3 and 4 if it's already recorded:** the ticket has a comment starting
    `[autopilot:decision-log]`, or
    `ancestor = <Decision Log id> AND type = page AND text ~ "<ticket key>"` finds a
    page.
@@ -183,3 +183,33 @@ For each one:
    No `## Memory` section. Read the title back from the response; if it differs
    (Confluence renames a duplicate title silently), report it in the run summary.
 4. Comment on the ticket: `[autopilot:decision-log]` and the page link.
+5. Either way, if "Decisions" has no row for its key, add one (**Decisions**), linking its
+   Decision Log page: scope `repo:<name>` unless the ticket names a wider one; a `repo:` row's
+   follow-through is the ticket itself, a wider one's "for the fleet run".
+
+### Decisions
+
+Every owner decision is recorded once, as a row on the OPS page "Decisions" (`space = OPS AND
+type = page AND title = "Decisions"`), newest first: the date, the decision in a sentence, its
+**scope**, why, a link to where it was made, and its follow-through. Scope is `company`,
+`all repos`, `lane:<lane>` or `repo:<name>`, by `fleet.json` name (bonham-ops `bin/fleet scopes`).
+A thread adds the row in the turn the owner decides (a decision card, an approval, "from now
+on"); the steward adds rows by **Decision Log**. Skip a decision already there (search its
+ticket key or link). Add rows only, and no `## Memory` section; write as **Record in
+Confluence** writes the Session Log (`snapshotToken`, one retry on `snapshot_stale`, title read
+back). Over 40,000 characters, first move the oldest rows unchanged to a child page "Decisions
+<year>": the only edit allowed. A missing page: a thread creates that one page once, titled
+exactly "Decisions", at the top of space `OPS` (not a project's page tree); a scheduled run says
+so and skips the row, and a later run adds it (**Decision Log** step 5).
+
+**Follow-through**, filed in the same turn and linked in the row, else "none needed: <why>":
+- `all repos` or `lane:`: a BORG policy ticket (`ap-owner-merge`); refresh PRs carry it;
+- `company` (brand, offers, business): a BORG `needs-operator` ticket to change the Business &
+  Brand Handbook (Confluence); only the owner changes it, marking the page `owner-approved`;
+- `repo:`: a ticket in that repo's Jira project (BORG with its `proj:` label if it has none),
+  or its `.claude/rules/autopilot.local.md`.
+A scheduled steward files nothing outside its own Jira project: there a wider row says "for
+the fleet run", and the fleet run files it (**Fleet digest**, **Decided this week**).
+
+**Read before acting:** a thread reads the last 30 days of rows for its scopes, `company`,
+`all repos`, its lane and its repo (bonham-ops `bin/fleet scopes <name>`), with project memory.
