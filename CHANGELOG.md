@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- Tests: an e2e spec reads the colour field of every VP9 key frame in a real ESCAPEARTIST WebM export and a real ESCAPECRAFT WebCodecs take, and checks it names the matrix the file should carry (BT.709 in Chromium, the corrected BT.601 for an ESCAPEARTIST export in Firefox) and agrees with the file's Colour element, also with the encoder's key frames forced to say "unknown" so Chromium's PR runs catch a broken rewrite (ESCSUITE-485).
 - ESCAPEARTIST: in Chrome and Edge, exporting asks where to save the video and writes it straight to that file as it encodes, and Save writes over the project file you opened or first saved instead of downloading another copy; File > Save Project As... picks a new file (ESCSUITE-470).
 - ESCAPEARTIST: Zoom to region: drag a box on the preview (or type it) and a video clip eases in to fill the frame with it at the playhead, holds, and eases back out, written as ordinary keyframes that one undo removes (ESCSUITE-475).
 - ESCAPEARTIST: a clip can play from 0.25× to 4× (the inspector's new Speed section): its length on the timeline follows, the clips after it move to match, linked parts change speed with it, and its sound plays pitched with the picture up to 2× and silent above, in the preview, every export and the headless render (ESCSUITE-471).

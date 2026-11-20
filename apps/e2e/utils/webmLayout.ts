@@ -1,6 +1,7 @@
 /**
  * A WebM's video blocks, Clusters and Cues, read in Node from its bytes
- * (ESCSUITE-417). Enough to ask the two questions a seekable ESCAPECRAFT take
+ * (ESCSUITE-417), and its video track's codec and Colour matrix with each
+ * frame's bytes (ESCSUITE-485). Enough to ask the two questions a seekable ESCAPECRAFT take
  * has to answer yes to: does every video frame have a timecode of its own, and
  * does every key frame open its Cluster's video with a cue pointing at it?
  *
@@ -21,10 +22,16 @@ export interface VideoBlock {
   cluster: number
   /** Whether it is the first video block of its Cluster. */
   firstInCluster: boolean
+  /** The frame itself: the block's payload, a view into the file's bytes. */
+  data: Uint8Array
 }
 
 export interface WebmLayout {
   videoTrack: number
+  /** The video track's CodecID, such as `V_VP9`. */
+  videoCodec: string
+  /** Its Colour element's MatrixCoefficients (ISO/IEC 23091-4: 1 BT.709, 5 BT.470BG, 6 SMPTE 170M), or null without one. */
+  videoMatrixCoefficients: number | null
   videoBlocks: VideoBlock[]
   /** Each Cluster's offset from the Segment's data, as a CueClusterPosition counts it. */
   clusterPositions: number[]
@@ -67,7 +74,14 @@ export function readWebmLayout(bytes: Uint8Array): WebmLayout {
 
   const segment = element(element(0).end)
   if (segment.id !== SEGMENT) throw new Error('Not a WebM: no Segment after the EBML header')
-  const layout: WebmLayout = { videoTrack: 0, videoBlocks: [], clusterPositions: [], cues: [] }
+  const layout: WebmLayout = {
+    videoTrack: 0,
+    videoCodec: '',
+    videoMatrixCoefficients: null,
+    videoBlocks: [],
+    clusterPositions: [],
+    cues: [],
+  }
 
   for (let at = segment.dataStart; at < bytes.length; ) {
     const e = element(at)
@@ -76,7 +90,16 @@ export function readWebmLayout(bytes: Uint8Array): WebmLayout {
         const fields = children(entry)
         const number = fields.find((f) => f.id === 0xd7)
         const type = fields.find((f) => f.id === 0x83)
-        if (number && type && uint(type) === 1) layout.videoTrack = uint(number)
+        if (number && type && uint(type) === 1) {
+          layout.videoTrack = uint(number)
+          const codec = fields.find((f) => f.id === 0x86)
+          if (codec) layout.videoCodec = new TextDecoder().decode(bytes.subarray(codec.dataStart, codec.end))
+          // Video > Colour > MatrixCoefficients
+          const video = fields.find((f) => f.id === 0xe0)
+          const colour = video && children(video).find((f) => f.id === 0x55b0)
+          const matrix = colour && children(colour).find((f) => f.id === 0x55b1)
+          if (matrix) layout.videoMatrixCoefficients = uint(matrix)
+        }
       }
     } else if (e.id === CUES) {
       for (const point of children(e)) {
@@ -109,6 +132,8 @@ export function readWebmLayout(bytes: Uint8Array): WebmLayout {
               key: (bytes[head + 2] & 0x80) !== 0,
               cluster,
               firstInCluster: !sawVideo,
+              // After the timecode and the flags byte; Mediabunny never laces.
+              data: bytes.subarray(head + 3, child.end),
             })
             sawVideo = true
           }

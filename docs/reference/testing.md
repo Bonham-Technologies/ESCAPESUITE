@@ -177,6 +177,16 @@ a blob URL, an unclosed one reported by `describeGrowth`, and a terminated one g
 `export/decode-worker.spec.ts` checks an MP4 export made decoders in the worker (`created` grew)
 and left none open.
 
+**VP9 colour labels** (ESCSUITE-485). `export/vp9-colour-space.spec.ts` reads every VP9 key
+frame header of an ARTIST WebM export and a CRAFT WebCodecs take (`utils/webmLayout.ts` for the
+frames and the Colour element, `utils/vp9Header.ts`, a parser written from the VP9 spec rather
+than imported from `packages/shared`) and checks `color_space` against what the file should
+carry and against the Colour element's matrix. Chromium 153's encoder writes `color_space`
+itself, so each case also runs with a `VideoEncoder` wrapper clearing it to "unknown", as
+Firefox's encoder leaves it: that variant is what fails in Chromium when the app's rewrite
+(`vp9ColourSpace.ts`) breaks. Firefox runs it in the Nightly and in `e2e-cross-browser` when the
+spec changes.
+
 **Blind spots.** Workers started from `blob:` or `data:` URLs (the single-file builds inline theirs
 that way), workers started by a worker (Playwright does not route their script requests), shared
 and service workers are not probed. In a module worker, a decoder made while its
