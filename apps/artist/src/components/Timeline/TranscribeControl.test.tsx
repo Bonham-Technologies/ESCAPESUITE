@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event';
 import { TranscribeControl } from './TranscribeControl';
 import { TRANSCRIPTION_LANGUAGE_KEY, languagePackNotice } from '../../core/transcriptionLanguage';
 import { useEditorStore } from '../../store/projectStore';
-import { resetStoreForTest, store } from '../../test/fixtures/projectStore';
+import { addClip, resetStoreForTest, store } from '../../test/fixtures/projectStore';
 import { serializeCaptions } from '../../core/captions';
 import type { CaptionCue } from '../../core/captions';
 import type { TranscribeTimelineOptions } from '../../core/transcribe';
@@ -1167,5 +1167,85 @@ describe('TranscribeControl: a run cut short keeps what was heard (ESCSUITE-484)
     act(() => seen.progress?.('listening', 6, 10));
     expect(screen.queryByText('0:06 / 0:10')).toBeNull();
     expect(button()).toBeEnabled();
+  });
+});
+
+describe('TranscribeControl: the timeline edited while it transcribes (ESCSUITE-486)', () => {
+  const CHANGED = 'The timeline changed while transcribing; the captions follow it as it was when you started.';
+
+  /** A run on a timeline holding one media clip, held until `finish` (the cues then land as a finished run's). */
+  async function startOnClip() {
+    const clip = addClip('speech', 0, 10);
+    let finish!: () => void;
+    transcribeTimeline.mockImplementation(() => new Promise((resolve) => { finish = () => resolve(STUB_WORDS); }));
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('available');
+    const view = renderControl();
+    await user.click((await screen.findByRole('button', { name: 'Transcribe to captions' }))!);
+    await screen.findByRole('button', { name: 'Stop transcribing' });
+    return { clip, finish: () => act(async () => finish()), ...view };
+  }
+
+  it('warns when a clip was moved while it transcribed', async () => {
+    const { clip, finish, showNotification } = await startOnClip();
+    store().updateClip(clip.id, { timelinePosition: 3 });
+    await finish();
+    expect(captionClips()).toHaveLength(2);
+    expect(showNotification).toHaveBeenCalledWith(`Transcribed 2 captions onto the Captions track. ${CHANGED}`, 'info');
+  });
+
+  it('warns when a clip was trimmed or removed while it transcribed (Remove silences, a ripple delete)', async () => {
+    const { clip, finish, showNotification } = await startOnClip();
+    store().removeClipFromTimeline(clip.id);
+    await finish();
+    expect(showNotification).toHaveBeenCalledWith(`Transcribed 2 captions onto the Captions track. ${CHANGED}`, 'info');
+  });
+
+  it('does not warn for edits that move nothing: a rename, a style change, a title added', async () => {
+    const { clip, finish, showNotification } = await startOnClip();
+    store().updateClip(clip.id, { name: 'Renamed', blendMode: 'multiply' });
+    store().addCaptionCues([{ start: 20, end: 21, text: 'a title' }], { fontSize: 40 } as never);
+    await finish();
+    expect(showNotification).toHaveBeenCalledWith(expect.stringMatching(/^Transcribed 2 captions onto the Captions track\.$/), 'success');
+    expect(showNotification).not.toHaveBeenCalledWith(expect.stringContaining(CHANGED), expect.anything());
+  });
+
+  it('does not warn when an edit made while it transcribed was undone before it finished', async () => {
+    const { clip, finish, showNotification } = await startOnClip();
+    store().updateClip(clip.id, { timelinePosition: 3 });
+    store().undo();
+    await finish();
+    expect(showNotification).toHaveBeenCalledWith('Transcribed 2 captions onto the Captions track.', 'success');
+  });
+
+  it('warns on a run stopped while listening too, when a clip was moved meanwhile (ESCSUITE-484)', async () => {
+    const clip = addClip('speech', 0, 10);
+    transcribeTimeline.mockImplementation(({ signal, onProgress }) => {
+      onProgress?.('mixing', 100, 100);
+      onProgress?.('listening', 4.6, 10);
+      return new Promise((_, reject) => {
+        signal!.addEventListener('abort', () => {
+          const stopped = new DOMException('Transcription cancelled', 'AbortError');
+          reject(Object.assign(new Error(stopped.message), { name: 'TranscriptionCutShort', reason: stopped, cues: [STUB_WORDS[0]], stoppedAt: 4.6 }));
+        });
+      });
+    });
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('available');
+    const { showNotification } = renderControl();
+    await user.click((await screen.findByRole('button', { name: 'Transcribe to captions' }))!);
+    await screen.findByText('Transcribing on this device…');
+    store().updateClip(clip.id, { timelinePosition: 2 });
+
+    await user.click(screen.getByRole('button', { name: 'Stop transcribing' }));
+
+    await waitFor(() =>
+      expect(showNotification).toHaveBeenCalledWith(
+        `Transcription stopped at 0:04. Added 1 caption heard before then to the Captions track. ${CHANGED}`,
+        'info'
+      )
+    );
   });
 });
