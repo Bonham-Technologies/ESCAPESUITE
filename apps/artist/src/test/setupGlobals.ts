@@ -1,0 +1,64 @@
+// The test globals every ARTIST suite gets, whichever environment it runs in.
+// The `node` project (pure-logic suites, ESCSUITE-488) loads only this file;
+// the `jsdom` project loads it through `setup.ts`, after the shared DOM setup.
+// See docs/reference/testing.md, "Test environments".
+//
+// Install real fake-indexeddb BEFORE any other setup, so storage modules that
+// open IndexedDB on import resolve against the working in-memory implementation
+// rather than a non-functional stub. Must be a static import so it is hoisted
+// before any vi.stubGlobal calls below.
+import 'fake-indexeddb/auto'
+import { Blob as NodeBlob } from 'node:buffer'
+import { vi } from 'vitest'
+
+// jsdom's Blob is not structured-clone-serialisable in the way Node.js's
+// structuredClone expects (size/type are lost on round-trip through
+// fake-indexeddb). Replace with Node.js's native Blob so IndexedDB storage
+// tests that assert blob.size / blob.type work correctly.
+vi.stubGlobal('Blob', NodeBlob)
+
+// Mock localStorage (jsdom provides one but it can be overwritten by other mocks)
+const localStorageStore: Record<string, string> = {}
+vi.stubGlobal('localStorage', {
+  getItem: vi.fn((key: string) => localStorageStore[key] ?? null),
+  setItem: vi.fn((key: string, value: string) => { localStorageStore[key] = value }),
+  removeItem: vi.fn((key: string) => { delete localStorageStore[key] }),
+  clear: vi.fn(() => { Object.keys(localStorageStore).forEach(k => delete localStorageStore[k]) }),
+  get length() { return Object.keys(localStorageStore).length },
+  key: vi.fn((index: number) => Object.keys(localStorageStore)[index] ?? null),
+})
+
+// Mock URL.createObjectURL and revokeObjectURL
+// Keep URL constructor functional but mock the static methods.
+// Every call mints a DISTINCT handle: a stub that returned one literal for
+// every call made a revoke of a previous test's leaked URL indistinguishable
+// from a revoke of the current test's, so tests could not tell "freed the
+// handle it was given" from "freed some handle".
+const OriginalURL = globalThis.URL
+let objectUrlSerial = 0
+vi.stubGlobal('URL', class extends OriginalURL {
+  static createObjectURL = vi.fn(() => `blob:mock-url-${++objectUrlSerial}`)
+  static revokeObjectURL = vi.fn()
+})
+
+// Mock AudioContext for audio tests
+vi.stubGlobal('AudioContext', class AudioContext {
+  createBufferSource = vi.fn(() => ({
+    connect: vi.fn(),
+    start: vi.fn(),
+    stop: vi.fn(),
+  }))
+  createGain = vi.fn(() => ({
+    connect: vi.fn(),
+    gain: { value: 1 },
+  }))
+  decodeAudioData = vi.fn()
+  close = vi.fn()
+  destination = {}
+})
+
+// Mock OfflineAudioContext
+vi.stubGlobal('OfflineAudioContext', class OfflineAudioContext {
+  decodeAudioData = vi.fn()
+  startRendering = vi.fn()
+})

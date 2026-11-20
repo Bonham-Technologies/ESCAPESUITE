@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- Tests: ESCAPEARTIST's 103 pure-logic unit test files run in Node instead of a jsdom window, so the unit suite spends a third less time creating test environments and finishes about 18% sooner, with the same tests and the same coverage (ESCSUITE-488).
 - ESCAPEARTIST: in Chrome and Edge, exporting asks where to save the video and writes it straight to that file as it encodes, and Save writes over the project file you opened or first saved instead of downloading another copy; File > Save Project As... picks a new file (ESCSUITE-470).
 - ESCAPEARTIST: Zoom to region: drag a box on the preview (or type it) and a video clip eases in to fill the frame with it at the playhead, holds, and eases back out, written as ordinary keyframes that one undo removes (ESCSUITE-475).
 - ESCAPEARTIST: a clip can play from 0.25× to 4× (the inspector's new Speed section): its length on the timeline follows, the clips after it move to match, linked parts change speed with it, and its sound plays pitched with the picture up to 2× and silent above, in the preview, every export and the headless render (ESCSUITE-471).
