@@ -37,7 +37,9 @@
  * (`TIME_TOLERANCE_US` in `workers/frameDecoder.ts`, 0.5 ms). So a request
  * that is not on a frame start, from a trim or a source whose frames are not
  * on the timeline's grid, moves by one millisecond, and one within a
- * millisecond before a frame's stored start is treated as that frame. Below a
+ * millisecond before a frame's stored start is treated as that frame. The
+ * worker's tolerance is half that, so for a request 0.5-1 ms before a frame's
+ * start the two paths show neighbouring frames (the worker the earlier). Below a
  * quarter of a frame at 240 fps, the bias cannot carry a request on one
  * frame's start past the next frame's, even with that one stored half a
  * millisecond early.
