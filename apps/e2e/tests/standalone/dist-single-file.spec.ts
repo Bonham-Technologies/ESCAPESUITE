@@ -1,7 +1,9 @@
 import { test, expect } from '@playwright/test'
-import { readdirSync, readFileSync, existsSync } from 'node:fs'
+import { readdirSync, existsSync, readFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import { findCspMetas, findScripts, networkSources, parseCsp, scriptHash } from '../../../../scripts/offline-csp.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -52,6 +54,51 @@ test.describe('standalone dist/ is exactly one file (ESCSUITE-153)', () => {
 
   test('ESCAPECRAFT', () => {
     assertSingleFileDist('ESCAPECRAFT', resolve(__dirname, '../../../craft/dist'))
+  })
+})
+
+/**
+ * ESCSUITE-467: each offline file carries exactly one Content-Security-Policy
+ * `<meta>`, ahead of every script, whose policy admits no network scheme or
+ * host and lets in exactly the file's own inline scripts. The release workflow
+ * copies `dist/index.html` byte for byte to the versioned and `-latest.html`
+ * assets, so this is the check for the files users download. The browser side
+ * (an injected fetch, WebSocket and remote image all refused) is
+ * `offline-csp.spec.ts`; the policy builder's own rules are
+ * `scripts/offline-csp.test.mjs`.
+ */
+function assertOfflinePolicy(distDir: string) {
+  const html = readFileSync(resolve(distDir, 'index.html'), 'utf8')
+
+  const metas = findCspMetas(html)
+  expect(metas, 'exactly one Content-Security-Policy <meta>').toHaveLength(1)
+  const [meta] = metas
+
+  const scripts = findScripts(html)
+  expect(scripts.length, 'the build has scripts to protect').toBeGreaterThan(0)
+  expect(meta.index, 'the policy <meta> comes before every <script>').toBeLessThan(scripts[0].index)
+
+  const directives = new Map(parseCsp(meta.policy).map((d) => [d.name, d.sources]))
+  expect(directives.get('default-src')).toEqual(["'none'"])
+  expect(directives.get('base-uri')).toEqual(["'none'"])
+  expect(directives.get('form-action')).toEqual(["'none'"])
+  expect(networkSources(meta.policy), `no directive may admit the network: ${meta.policy}`).toEqual([])
+
+  // Inline scripts run by hash, never by 'unsafe-inline', and every hash is
+  // one of this file's own scripts.
+  const scriptSrc = directives.get('script-src') ?? []
+  expect(scriptSrc).not.toContain("'unsafe-inline'")
+  const ownHashes = scripts.filter((s) => s.executable).map((s) => scriptHash(s.text))
+  expect(scriptSrc.filter((source) => source.startsWith("'sha256-")).sort()).toEqual([...ownHashes].sort())
+}
+
+test.describe('standalone dist/ carries the offline Content-Security-Policy (ESCSUITE-467)', () => {
+  test('ESCAPEARTIST', () => {
+    assertOfflinePolicy(resolve(__dirname, '../../../artist/dist'))
+  })
+
+  test('ESCAPECRAFT', () => {
+    assertOfflinePolicy(resolve(__dirname, '../../../craft/dist'))
   })
 })
 

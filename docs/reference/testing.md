@@ -65,6 +65,17 @@
   which also aborts every off-origin request so the run sends nothing out). Its negative cases
   inject a `fetch` to another host and prove the check throws. The standalone suites use the same
   helper with an empty allow-list. The hub's `/limitations` page links to this spec.
+  ESCSUITE-467: the offline builds carry a Content-Security-Policy `<meta>` that admits no network
+  source (`scripts/offline-csp.mjs`, unit-tested by `scripts/offline-csp.test.mjs`). Every
+  standalone spec imports `test` from `tests/standalone/cspGuard.ts`, whose auto fixture fails a
+  test the policy refused anything in (`apps/e2e/utils/cspViolations.ts`: the
+  `securitypolicyviolation` event plus Chromium's console line). A refused AudioWorklet module
+  raises neither, so CRAFT's worklet cases check the app's own "Recording audio through" line.
+  `offline-csp.spec.ts` injects a `fetch`, a WebSocket and a remote `<img>` (served and from
+  `file://`) and expects each refused; `dist-single-file.spec.ts` checks the built tag;
+  `artist-export.spec.ts` and `artist-transcribe.spec.ts` run edit, WebM/MP4/GIF export, the
+  decode worker and transcription (stubbed recogniser) under the policy. A source the app newly
+  needs goes in `OFFLINE_CSP_EXTRA`, never as a network scheme or host.
   ESCSUITE-406: `tests/production/analytics-strip-query.spec.ts` is the one spec that needs the
   network: it fetches Vercel's live Web Analytics script from `va.vercel-scripts.com` (Vercel
   publishes it under no licence, so it is not committed) and fails if the CDN is unreachable.
