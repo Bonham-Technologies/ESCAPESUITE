@@ -3,6 +3,7 @@ import { useDialogBehaviour } from '@escapesuite/shared/hooks';
 import { holdScreenAwake } from '@escapesuite/shared/utils';
 import { useEditorStore } from '../../store/projectStore';
 import { captionStyleFor, captionWrapColumns, wrapCaptionText } from '../../core/captions';
+import { soundTimingChanged } from '../../core/transcribeTiming';
 import type { CaptionCue } from '../../core/captions';
 import {
   getLocalRecognitionCtor,
@@ -45,6 +46,10 @@ interface TranscribeControlProps {
 function stoppedError(): DOMException {
   return new DOMException('Transcription stopped', 'AbortError');
 }
+
+/** Added to the finishing notice when the timeline's sound moved during the run (ESCSUITE-486). */
+export const TIMELINE_CHANGED_NOTE =
+  'The timeline changed while transcribing; the captions follow it as it was when you started.';
 
 /** The abort reason the Stop button gives, so a run can tell it from a project replaced (ESCSUITE-484). */
 const USER_STOP = 'user-stop';
@@ -99,6 +104,11 @@ function clock(seconds: number): string {
  * the sound is prepared, or before anything was heard, adds nothing, and a
  * project replaced mid-run never gets any (ESCSUITE-432). **Replace** then
  * replaces only the captions before where it stopped.
+ *
+ * Edits during a run are allowed, but the cues are timed against the timeline
+ * as it was at the start: when a media clip's place or length changed
+ * meanwhile (`soundTimingChanged`), the finishing notice ends with
+ * `TIMELINE_CHANGED_NOTE` and reads as info, not success (ESCSUITE-486).
  *
  * When the Captions track already holds text clips, a press first asks
  * `REPLACE_QUESTION` in a modal dialog (ESCSUITE-442): **Replace** has
@@ -311,13 +321,19 @@ export function TranscribeControl({ showNotification, onDialogOpenChange }: Tran
         cut && keptAfter > 0
           ? ` The ${keptAfter === 1 ? 'caption' : `${keptAfter} captions`} already there from ${clock(cut.stoppedAt)} on ${keptAfter === 1 ? 'was' : 'were'} kept.`
           : '';
-      const notes = keptNote + (hidden ? ' The Captions track is hidden.' : '');
+      // ESCSUITE-486: the cues are timed against the timeline as it was at the
+      // start. An edit since that moved its sound leaves them out of step, so
+      // the notice says so rather than reading as a plain success.
+      const changed = soundTimingChanged(timeline.clips, now.clips);
+      const notes =
+        keptNote + (hidden ? ' The Captions track is hidden.' : '') + (changed ? ` ${TIMELINE_CHANGED_NOTE}` : '');
+      const done = changed ? 'info' : 'success';
       if (!cut) {
-        showNotification(`Transcribed ${count} onto the Captions track.${notes}`, 'success');
+        showNotification(`Transcribed ${count} onto the Captions track.${notes}`, done);
       } else if (cut.reason.name === 'AbortError') {
         showNotification(
           `Transcription stopped at ${clock(cut.stoppedAt)}. Added ${count} heard before then to the Captions track.${notes}`,
-          'success'
+          done
         );
       } else {
         showNotification(

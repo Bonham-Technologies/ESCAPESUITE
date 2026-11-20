@@ -121,7 +121,9 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   ends the run. If `onend` has not come `END_WAIT_MS` (5 s) later, the run finishes anyway
   with what was heard and the recogniser is aborted (ESCSUITE-438): a recogniser that never
   ended used to leave the control reading "0:06 / 0:06" for good.
-  Edits made during the run do not change what is heard: the mix was taken at the start.
+  Edits made during the run do not change what is heard: the mix was taken at the start,
+  and the cues are timed against the timeline as it was then. Editing is not blocked while it
+  runs; instead the finishing notice warns when the timing moved (ESCSUITE-486, below).
   One run at a time: presses while the browser is still being asked are ignored.
 - **One project (ESCSUITE-432).** A run belongs to the project it was started in: it records
   that project's `id` and watches the store. When another project takes its place (New
@@ -136,6 +138,20 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   the button at once. The mixer sees the same signal and stops after the chunk it is mixing
   (ESCSUITE-433); a new run still shows "Preparing the sound…" and waits for the stopped mix
   to end before mixing, so two mixes never hold memory at once.
+- **Edited while it ran (ESCSUITE-486).** The run keeps the clips it started on, and before
+  the cues are added `soundTimingChanged` (`core/transcribeTiming.ts`) compares them with the
+  clips now on the timeline. When any media clip (a video, an audio or an image clip) was
+  added, removed, split, moved, trimmed, slipped, sped up or put on another track (a drag, a
+  ripple delete, Remove silences), the captions are still added where they were heard, which
+  is out of step with the edited timeline, and the notice ends "The timeline changed while
+  transcribing; the captions follow it as it was when you started." and shows as info instead of success. A run cut short
+  (**Cut short** below) carries the same sentence; a recogniser error stays an error. Edits that
+  move no sound do not warn: a rename, a style or effect change, a title or caption added,
+  moved or restyled (text and shape overlays make no sound), or an edit undone before the run
+  ends (the two timelines are compared, not the edits between them). An image clip moved
+  does warn, though it makes no sound: the check reads only the clips, not their sources.
+  The cues are not re-timed: Ctrl+Z takes them off, and transcribing again hears the edited
+  timeline.
 - **Cut short keeps what was heard (ESCSUITE-484).** Stop while it listens, or a recogniser
   error then (anything but the benign `no-speech` and `aborted`), no longer throws away the
   captions heard so far. The core's `fail()` turns everything heard up to then into cues, as a

@@ -1903,7 +1903,7 @@ test.describe('Color Contrast', () => {
       const minGap = dialog.getByLabel('Minimum gap (s)')
       await minGap.fill('99')
       await expect(minGap).toHaveAttribute('aria-invalid', 'true')
-      await expect(dialog.getByText('Enter a number from 0 to 60.')).toBeVisible()
+      await expect(dialog.getByText('Enter a number from 0.1 to 60.')).toBeVisible()
       const removeAll = dialog.getByRole('button', { name: 'Remove all' })
       // ESCSUITE-449: the lock is named on open and Remove all is disabled.
       await expect(removeAll).toBeDisabled()
