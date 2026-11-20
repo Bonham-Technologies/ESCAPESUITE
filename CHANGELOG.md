@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- Tests: ESCAPEARTIST's 103 pure-logic unit test files run in Node instead of a jsdom window, so the unit suite spends a third less time creating test environments and finishes about 18% sooner, with the same tests and the same coverage (ESCSUITE-488).
 - Tests: an e2e spec reads the colour field of every VP9 key frame in a real ESCAPEARTIST WebM export and a real ESCAPECRAFT WebCodecs take, and checks it names the matrix the file should carry (BT.709 in Chromium, the corrected BT.601 for an ESCAPEARTIST export in Firefox) and agrees with the file's Colour element, also with the encoder's key frames forced to say "unknown" so Chromium's PR runs catch a broken rewrite (ESCSUITE-485).
 - ESCAPEARTIST: exports of a 30 fps WebM (an ESCAPECRAFT recording, say) no longer show the previous frame in place of some frames (every third one at a steady 30 fps): the in-page exporters now seek 1 ms past each frame's start, past WebM's millisecond-rounded frame times, instead of 0.1 ms (ESCSUITE-495).
 - ESCAPEARTIST: Remove silences' Minimum gap starts at 0.1 s instead of 0, Remove all waits while a setting does not read, and above 500 pauses the list shows them 500 at a time with a Show more button while the summary gives the count and Remove all still cuts them all, so an hour-long recording stays quick to tune (ESCSUITE-487).

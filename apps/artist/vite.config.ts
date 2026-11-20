@@ -1,11 +1,14 @@
 /// <reference types="vitest" />
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { viteSingleFile } from 'vite-plugin-singlefile'
 import { visualizer } from 'rollup-plugin-visualizer'
 import { readFileSync, writeFileSync, unlinkSync, existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { isSingleFileBuild } from './singleFileBuild.js'
+import { NODE_TEST_SUITES } from './nodeTestSuites.ts'
+
+const TEST_FILES = 'src/**/*.{test,spec}.{js,ts,jsx,tsx}'
 
 /**
  * Headless-build Vite plugin: rewrite module-worker instantiation to classic workers.
@@ -238,9 +241,31 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    environment: 'jsdom',
-    setupFiles: ['./src/test/setup.ts'],
-    include: ['src/**/*.{test,spec}.{js,ts,jsx,tsx}'],
+    // Two projects, one per test environment (ESCSUITE-488). A jsdom window
+    // costs about a third of a second per file, so the suites in nodeTestSuites.ts
+    // run in `node`; every other suite, new ones included, runs in jsdom.
+    // Coverage below is set once here and covers both projects.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'jsdom',
+          environment: 'jsdom',
+          setupFiles: ['./src/test/setup.ts'],
+          include: [TEST_FILES],
+          exclude: [...configDefaults.exclude, ...NODE_TEST_SUITES],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'node',
+          environment: 'node',
+          setupFiles: ['./src/test/setupGlobals.ts'],
+          include: NODE_TEST_SUITES,
+        },
+      },
+    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'json-summary', 'html'],

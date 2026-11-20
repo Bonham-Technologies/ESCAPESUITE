@@ -3,6 +3,66 @@
 
 Vitest + Testing Library in jsdom, with a v8 coverage floor enforced by `pnpm test:coverage`
 (see the root `CLAUDE.md`'s coverage policy for the numbers and the rule that they only go up).
+The pure-logic suites run in Node instead of jsdom; see [Test environments](#test-environments).
+
+## Test environments
+
+`vite.config.ts` splits the suite into two Vitest projects (ESCSUITE-488):
+
+- **`node`** runs the files listed in `nodeTestSuites.ts` (beside `vite.config.ts`) in Vitest's
+  `node` environment, with `src/test/setupGlobals.ts` as its only setup file: fake-indexeddb,
+  Node's `Blob`, the `localStorage`, `URL.createObjectURL` and `AudioContext` stubs.
+- **`jsdom`** runs every other file, a new one included, with `src/test/setup.ts`: the shared DOM
+  setup (`@escapesuite/shared/test/setup`: jest-dom, Testing Library cleanup, `matchMedia`,
+  `ResizeObserver`) and then the same `setupGlobals.ts`, in the same order as before.
+
+Coverage is configured once at the top level and covers both projects, so `pnpm test:coverage`,
+its thresholds and its `src` file list are unchanged. Both projects keep per-file isolation.
+`vitest run --project node` (or `jsdom`) runs one half.
+
+**Why.** Vitest creates a fresh jsdom window for every test file, about a third of a second each.
+Before the split it made 302 of them, and creating them was the largest single share of the
+suite's time (vitest's own hint: "jsdom was created 302 times", 41-45% of tracked time).
+
+**Which files are `node`.** The list holds a file only when (1) it passes in `node` on its own,
+on Node 22 and on Node 24 (CI's version), and (2) the whole suite's per-file v8 coverage
+(lines, statements, branches and functions, every `src` file) is identical with and without the
+split, so no suite reaches a different branch in Node than it did in jsdom. Both held for the 103
+files listed when the split landed. `app/sessionLock.test.ts` passes in Node 22 but is kept in
+jsdom on purpose: it asserts that the browser it runs in has no `navigator.locks`, which is true of
+jsdom's navigator and false of Node 24's. Files that need the DOM, or a double that builds on it
+(`src/test/doubles/canvas.ts` and `media.ts` call `document.createElement`), stay in jsdom.
+
+**Adding a test.** A new file runs in jsdom unless you add it to `nodeTestSuites.ts`. Add it when
+it is pure logic (no `document`, `window`, Testing Library or DOM-backed double, directly or
+through an import), and check it with `pnpm exec vitest run --project node <file>`. A file in the
+list that touches the DOM fails with `ReferenceError: document is not defined` (or `window`); take
+it out of the list. A renamed or deleted file left in the list matches nothing and the renamed
+file runs in jsdom, so a stale entry is harmless.
+
+**Why not `pool: 'vmThreads'`.** Vitest's hint suggests it (one jsdom per worker, still isolated
+per file), and it was measured: about 44 s for the whole suite, against about 69 s for the
+split. It was not taken because the suite does not mean the same thing in it. Each file then runs
+in its own `vm` context with its own `Error`, so an error built in another realm fails
+`instanceof Error`: under it `core/exportWebM.ts` lost a branch of coverage (the encoder `error:`
+callbacks' `e instanceof Error ? e : new Error(String(e))` took the other side), with every test
+still green. It also needed a `WritableStream` global added for the export tests, and
+`utils/integration.test.ts` fails there because `window.location` cannot be redefined in a real
+jsdom window. `isolate: false` is not used either: it shares one window across files.
+
+**Measured** on a shared 4-vCPU cloud container (other jobs running, load average 3-5), Node 22,
+vitest 5.1, the full `vitest run` (302 files, 7,257 tests), before and after run back to back,
+alternating, three of each:
+
+| | Run 1 | Run 2 | Run 3 | Mean | jsdom windows | Time creating them (summed over workers) | vitest's "environment" share |
+|---|---|---|---|---|---|---|---|
+| Before (all jsdom) | 83.3 s | 84.4 s | 84.3 s | 84.0 s | 302 | 99.7-102.1 s | 45% |
+| After (split) | 69.1 s | 69.3 s | 68.9 s | 69.1 s | 199 | 65.8-66.5 s | 36-37% |
+
+About 15 s (18%) less wall time, and a third less time spent creating environments; the 103 `node`
+files take about 17 s of worker time in all. The container is shared, so the absolute numbers move
+with its load (an earlier, unpaired pair of runs under a different load took 126 s and 112 s);
+compare runs made side by side, and prefer the environment figures, which move less.
 
 **Tests never mock the module under test.** Doubles stand in for boundaries the browser owns —
 canvas, media elements, WebCodecs, Web Audio, workers, IndexedDB, layout — never for ARTIST's
