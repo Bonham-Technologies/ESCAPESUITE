@@ -12,6 +12,7 @@
 // delivery). App's own orchestration is never mocked.
 import { vi } from 'vitest'
 import { createRecorderFactoryDouble } from './doubles/recorder'
+import { createTakeStoreFactoryDouble } from './doubles/takeStore'
 import type {
   EnvironmentCapabilities,
   DetailedCapabilities,
@@ -214,8 +215,17 @@ export const analyticsModule = {
 }
 
 /** Put every double back to its default behaviour and forget past calls. */
+// --- core/takeStore (only createTakeStore) ----------------------------------
+
+/**
+ * A browser that keeps every take on the device (ESCSUITE-466) — set
+ * `available = false` for one that cannot. See `doubles/takeStore.ts`.
+ */
+export const takeStoreFactory = createTakeStoreFactoryDouble()
+
 export function resetAppDoubles(): void {
   recorderFactory.reset()
+  takeStoreFactory.reset()
 
   permissionsOverrides.detectCapabilities.mockReset()
   permissionsOverrides.detectCapabilities.mockImplementation(async () => detectionResult())

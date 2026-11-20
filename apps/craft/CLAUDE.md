@@ -82,6 +82,7 @@ one and list it here). Don't add narrative, ticket history or measurements to th
 | Download Formats | [`download-formats.md`](docs/reference/download-formats.md) |
 | A take can be several files | [`a-take-can-be-several-files.md`](docs/reference/a-take-can-be-several-files.md) |
 | WebM Handling | [`webm-handling.md`](docs/reference/webm-handling.md) |
+| Crash-safe takes (OPFS, recovery prompt) | [`crash-safe-takes.md`](docs/reference/crash-safe-takes.md) |
 | Analytics | [`analytics.md`](docs/reference/analytics.md) |
 | Testing | [`testing.md`](docs/reference/testing.md) |
 | Keyboard Shortcuts | [`keyboard-shortcuts.md`](docs/reference/keyboard-shortcuts.md) |

@@ -87,6 +87,20 @@ There is no app code for the benchmarks' sake in either app:
   exact — `videoDraws === 2 x framesEncoded` — because anything else means either the overlay
   was never drawn (a plain conversion reported under this arm's name) or the screen was passed
   over twice.
+- **`craft-take-memory`** (ESCSUITE-466, `tests/perf/craft-take-memory.spec.ts`) — how the
+  page's memory grows over a 20 s screen-only WebCodecs take, measured in two arms:
+  - **kept on the device**: the app as it ships;
+  - **in memory**: `navigator.storage.getDirectory` removed before load, which is the
+    `BufferTarget` fallback every take used before.
+
+  Every 3 s the page is garbage-collected and read with CDP `Runtime.getHeapUsage`. The
+  reading is the JS heap **plus `backingStorageSize`**: a `BufferTarget`'s bytes live in
+  `ArrayBuffer` backing stores, which `performance.memory` does not count. It reports each
+  arm's least-squares growth per second, plus the take's own bytes-on-disk rate for scale. The
+  only checks are that each arm measured what it claims: the take was kept on the device and
+  grew, or the app said it was in memory only. First measured locally (2026-11-17, Chromium,
+  1280x720, two runs): **about 13–18 KB/s kept on the device, against 433–450 KB/s in memory**,
+  with the take writing 269–279 KB/s to disk.
 - **`headless-kit-render`** — `services/headless-artist` rendering
   `fixtures/headless/project.json`, Chromium launch included.
 

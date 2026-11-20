@@ -32,6 +32,7 @@ describe('LIMITATIONS', () => {
     // ESCSUITE-473
     ['translate-captions', 'apps/artist/docs/reference/on-device-translation.md'],
     ['float-controls', 'apps/craft/src/hooks/useFloatingControlsWindow.ts'],
+    ['unfinished-recordings', 'apps/craft/docs/reference/crash-safe-takes.md'],
     // ESCSUITE-474
     ['screen-stays-on', 'packages/shared/src/utils/screenWakeLock.ts'],
   ])('lists %s with its source document %s', (id, path) => {
@@ -48,10 +49,20 @@ describe('LIMITATIONS', () => {
     ['transcribe-captions', 'ESCSUITE-404'],
     ['translate-captions', 'ESCSUITE-473'],
     ['float-controls', 'ESCSUITE-400'],
+    ['unfinished-recordings', 'ESCSUITE-466'],
     ['screen-stays-on', 'ESCSUITE-474'],
   ])('lists %s with its ticket %s', (id, ticket) => {
     const limitation = LIMITATIONS.find((l) => l.id === id)
     expect(limitation!.sources.some((s) => s.label.startsWith(ticket))).toBe(true)
+  })
+
+  // ESCSUITE-466: name every take that is not kept, and what a full disk asks of the user.
+  it('says which recordings are not kept for recovery, and that recovering needs space free', () => {
+    const body = LIMITATIONS.find((l) => l.id === 'unfinished-recordings')!.body.join(' ')
+    expect(body).toMatch(/writes MP4 rather than WebM, such as older versions of Safari/)
+    expect(body).toMatch(/only WebM can be recovered/)
+    expect(body).toMatch(/free up some space first/)
+    expect(body).toMatch(/Nothing is uploaded/)
   })
 
   // ESCSUITE-474: the screen-on lock holds only while the tab is visible.

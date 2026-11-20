@@ -41,6 +41,10 @@ vi.mock('./core/thumbnailGenerator', async () => (await import('./test/appDouble
 vi.mock('./core/converter', async () => (await import('./test/appDoubles')).converterModule);
 vi.mock('./utils/sendToEditor', async () => (await import('./test/appDoubles')).sendToEditorModule);
 vi.mock('@vercel/analytics', async () => (await import('./test/appDoubles')).analyticsModule);
+vi.mock('./core/takeStore', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./core/takeStore')>()),
+  createTakeStore: (await import('./test/appDoubles')).takeStoreFactory.createTakeStore,
+}))
 
 let browser: BrowserStubs;
 
@@ -599,7 +603,7 @@ describe('App picture-in-picture', () => {
     expect(canvas.style.objectFit).toBe('contain');
     expect(pendingAnimationFrames()).toBeGreaterThan(0);
 
-    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), true, true, false);
+    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), true, true, false, expect.any(Object));
     expect(recorderFactory.last().isPiP).toBe(true);
 
     // The recorder gets the composited video plus the screen's own audio —
