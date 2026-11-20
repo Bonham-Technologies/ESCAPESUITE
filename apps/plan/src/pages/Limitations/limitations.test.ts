@@ -29,6 +29,8 @@ describe('LIMITATIONS', () => {
     ['hosted-analytics', 'docs/reference/vercel-analytics.md'],
     // ESCSUITE-445
     ['transcribe-captions', 'apps/artist/docs/reference/on-device-transcription.md'],
+    // ESCSUITE-473
+    ['translate-captions', 'apps/artist/docs/reference/on-device-translation.md'],
     ['float-controls', 'apps/craft/src/hooks/useFloatingControlsWindow.ts'],
     ['unfinished-recordings', 'apps/craft/docs/reference/crash-safe-takes.md'],
     // ESCSUITE-474
@@ -45,6 +47,7 @@ describe('LIMITATIONS', () => {
     ['three-hour-exports', 'ESCSUITE-367'],
     ['safari-private-browsing', 'ESCSUITE-397'],
     ['transcribe-captions', 'ESCSUITE-404'],
+    ['translate-captions', 'ESCSUITE-473'],
     ['float-controls', 'ESCSUITE-400'],
     ['unfinished-recordings', 'ESCSUITE-466'],
     ['screen-stays-on', 'ESCSUITE-474'],
@@ -81,6 +84,21 @@ describe('LIMITATIONS', () => {
       '“Your browser will download a speech language pack for English (United States) once. Your audio never leaves this device.”'
     )
     expect(body).not.toMatch(/browser language only/i)
+  })
+
+  // ESCSUITE-473: the vendor download, the notice word for word, and air-gapped use.
+  it('states what the translation model download is, that it waits for consent, and the offline limit', () => {
+    const entry = LIMITATIONS.find((l) => l.id === 'translate-captions')!
+    const body = entry.body.join(' ')
+    // ARTIST's notice (translationModelNotice in apps/artist/src/core/translationLanguage.ts) for en → es; plan cannot import ARTIST.
+    expect(body).toContain(
+      '“Your browser will download a translation model for English to Spanish once. Your captions never leave this device.”'
+    )
+    expect(body).toMatch(/Nothing is downloaded until you confirm, and Cancel downloads nothing/)
+    expect(body).toMatch(/Chrome gets it from Google/)
+    expect(body).toMatch(/Translating makes no network request of its own/)
+    expect(body).toMatch(/Without a network, translation works only if the model for that pair of languages is already installed/)
+    expect(body).toMatch(/Chrome on a computer, from version 138/)
   })
 
   it('scopes the transcription privacy claim to transcribing, and does not date the browser list', () => {

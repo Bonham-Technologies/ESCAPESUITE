@@ -147,6 +147,20 @@ export const LIMITATIONS: Limitation[] = [
     ],
   },
   {
+    id: 'translate-captions',
+    title: 'Translate captions: only where the browser has on-device translation',
+    body: [
+      'ESCAPEARTIST’s Translate captions uses your browser’s own on-device translation, so the button appears only where the browser has it. Today that means Chrome on a computer, from version 138; another browser shows it once it has the same feature. Phones do not have it, and Chromium-based apps that do not identify as Chrome, Edge, Opera or Brave never show it. It translates the captions into a second caption track in the language you pick, with the same timing; you can show, hide and export each language on its own.',
+      'The first time you translate between two languages, your browser may download a translation model for that pair. ESCAPEARTIST asks first, with a notice that names both languages, such as “Your browser will download a translation model for English to Spanish once. Your captions never leave this device.” Nothing is downloaded until you confirm, and Cancel downloads nothing. The browser downloads the model itself, from wherever its maker provides it (Chrome gets it from Google). ESCAPEARTIST does not choose, see or pass on that download. Translating makes no network request of its own: ESCAPEARTIST downloads nothing for it and sends no captions anywhere.',
+      'Without a network, translation works only if the model for that pair of languages is already installed in that browser profile.',
+    ],
+    sources: [
+      repoFile('apps/artist/docs/reference/on-device-translation.md'),
+      repoFile('apps/artist/src/core/translatorLocal.ts'),
+      ticket('ESCSUITE-473'),
+    ],
+  },
+  {
     id: 'float-controls',
     title: 'Float controls: not in every browser, and not when embedded',
     body: [
@@ -171,6 +185,17 @@ export const LIMITATIONS: Limitation[] = [
       'ESCAPE Suite is made for desktop browsers. Its pages may open on a phone or tablet, but recording, editing and exporting there are not supported.',
     ],
     sources: [{ label: 'Owner ruling, 2026-10-01' }],
+  },
+  {
+    id: 'hosted-offline',
+    title: 'The hosted site works offline after the first visit, app by app',
+    body: [
+      'On www.escapesuite.io, each app works offline after the first visit. Open the hub, ESCAPECRAFT or ESCAPEARTIST once while you are online and let it finish loading; after that, it opens and works with no connection, recording, editing and exporting included. Each app is saved on its own, so open each one you want while you are online.',
+      'It needs a browser with service workers, which current versions of Chrome, Edge, Firefox and Safari have. A private window may not keep the saved copy, or may not allow it at all. The browser may also discard the saved copy, for example when the device runs low on space, or in Safari after about seven days without a visit; open the app online again to save it again.',
+      'The saved copy is the app itself. Your recordings, imported files and projects are stored in the browser as before, not by this feature. When a new version is published, the app saves it the next time you open it online, and shows a short “Updated” note.',
+      'An app shown inside another page (in an iframe) does not save itself for offline use. The offline build from the Releases page needs no first visit at all.',
+    ],
+    sources: [repoFile('docs/reference/vercel-deployment.md'), repoFile('scripts/offline.mjs'), ticket('ESCSUITE-469')],
   },
   {
     id: 'hosted-analytics',
