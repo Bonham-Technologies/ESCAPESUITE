@@ -15,23 +15,32 @@ interface TimelineSilenceBandsProps {
  * "Remove all" will cut. Its own subscription: the list changes only while
  * the dialog is up, and nothing else on the timeline needs to re-render for it.
  * Decorative — the dialog's list is the accessible form of the same ranges.
+ *
+ * Pauses less than a pixel apart at the current zoom are drawn as one band
+ * (ESCSUITE-487): the gap between them could not be seen, and tens of
+ * thousands of short pauses made a band each, which slowed every keystroke in
+ * the dialog's fields.
  */
 export function TimelineSilenceBands({ pixelsPerSecond, height }: TimelineSilenceBandsProps) {
   const candidates = useEditorStore((state) => state.silenceReview?.candidates);
   if (!candidates?.length) return null;
+  const bands: { left: number; right: number }[] = [];
+  for (const range of candidates) {
+    const left = timeToPixels(range.start, pixelsPerSecond);
+    const right = timeToPixels(range.end, pixelsPerSecond);
+    const last = bands[bands.length - 1];
+    if (last && left - last.right < 1) last.right = Math.max(last.right, right);
+    else bands.push({ left, right });
+  }
   return (
     <>
-      {candidates.map((range) => (
+      {bands.map((band) => (
         <div
-          key={`${range.start}-${range.end}`}
+          key={`${band.left}-${band.right}`}
           className={styles.silenceBand}
           data-testid="silence-band"
           aria-hidden="true"
-          style={{
-            left: timeToPixels(range.start, pixelsPerSecond),
-            width: timeToPixels(range.end - range.start, pixelsPerSecond),
-            height,
-          }}
+          style={{ left: band.left, width: band.right - band.left, height }}
         />
       ))}
     </>

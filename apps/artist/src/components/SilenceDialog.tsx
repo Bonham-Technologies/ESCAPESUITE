@@ -19,10 +19,14 @@ interface SilenceDialogProps {
   onRemoved: (message: string) => void;
 }
 
-/** Each setting's field: its label, its bounds and its step. */
+/**
+ * Each setting's field: its label, its bounds and its step. The minimum gap
+ * starts at 0.1 s (ESCSUITE-487): peaks are 10 ms each, so a gap of 0 matched
+ * every quiet bucket and could list, and cut, thousands of 10 ms pauses.
+ */
 const FIELDS: { key: keyof SilenceOptions; label: string; hint: string; min: number; max: number; step: number }[] = [
   { key: 'thresholdDb', label: 'Threshold (dBFS)', hint: 'Quieter than this counts as silence.', min: -100, max: 0, step: 1 },
-  { key: 'minGap', label: 'Minimum gap (s)', hint: 'Shorter pauses are left alone.', min: 0, max: 60, step: 0.1 },
+  { key: 'minGap', label: 'Minimum gap (s)', hint: 'Shorter pauses are left alone.', min: 0.1, max: 60, step: 0.1 },
   { key: 'padding', label: 'Padding (s)', hint: 'Kept on each side of every cut.', min: 0, max: 5, step: 0.05 },
 ];
 
@@ -36,6 +40,14 @@ function clock(t: number): string {
 }
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * The most pauses the list draws (ESCSUITE-487). Each row is three buttons, so
+ * a few thousand made every keystroke in the fields slow; above this the list
+ * shows the first ones and the summary says how many were found. Display only:
+ * Remove all still cuts every pause found, and the timeline draws them all.
+ */
+const LISTED_PAUSES = 500;
 
 /** How much sound either side of a pause its "Play" lets you hear, in seconds (ESCSUITE-443). */
 const PLAY_MARGIN = 1;
@@ -290,6 +302,10 @@ function SilenceReview({ onRemoved }: SilenceDialogProps) {
   };
 
   const total = totalLength(candidates);
+  // ESCSUITE-487: the list stays as it was while a field does not read, so it
+  // is not what the fields say; nothing is cut until they do.
+  const settled = FIELDS.every((field) => parsed(field.key, values[field.key]) !== null);
+  const listed = candidates.length > LISTED_PAUSES ? candidates.slice(0, LISTED_PAUSES) : candidates;
 
   return (
     <div className={styles.overlay} data-testid="silence-dialog">
@@ -340,6 +356,8 @@ function SilenceReview({ onRemoved }: SilenceDialogProps) {
               : candidates.length === 0
               ? 'No pauses to cut with these settings.'
               : `${candidates.length} ${candidates.length === 1 ? 'pause' : 'pauses'} found · ${seconds(total)} will be cut`}
+            {listed.length < candidates.length &&
+              `. The list shows the first ${listed.length}; Remove all cuts all ${candidates.length}.`}
             {nearlyAll && ` This removes 90 % or more of ${reviewed.name || 'the clip'}.`}
           </p>
 
@@ -377,7 +395,7 @@ function SilenceReview({ onRemoved }: SilenceDialogProps) {
 
           {candidates.length > 0 && (
             <ul className={styles.list} aria-label="Pauses to cut" tabIndex={0}>
-              {candidates.map((range, i) => {
+              {listed.map((range, i) => {
                 const isActive = active !== null && active.start === range.start && active.end === range.end;
                 return (
                   <li
@@ -446,7 +464,7 @@ function SilenceReview({ onRemoved }: SilenceDialogProps) {
               type="button"
               className={styles.removeButton}
               onClick={handleRemoveAll}
-              disabled={candidates.length === 0 || locked}
+              disabled={candidates.length === 0 || locked || !settled}
             >
               Remove all
             </button>

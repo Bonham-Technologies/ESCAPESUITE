@@ -785,3 +785,115 @@ describe('Remove silences: muted and hidden rows (ESCSUITE-435)', () => {
     expect(screen.getByRole('button', { name: 'Remove all' })).toBeDisabled()
   })
 })
+
+describe('Remove silences: a floor on the minimum gap and a cap on the list (ESCSUITE-487)', () => {
+  beforeEach(() => resetStoreForTest())
+
+  async function openDialog(clipId: string, bands = false) {
+    store().setSelectedClipId(clipId)
+    const user = userEvent.setup()
+    const { rerender, onRemoved } = renderEditor()
+    await user.click(screen.getByRole('button', { name: 'Find silences' }))
+    rerender(
+      <>
+        <ClipEditor />
+        <Dialog onRemoved={onRemoved} />
+        {bands && <TimelineSilenceBands pixelsPerSecond={50} height={100} />}
+      </>
+    )
+    return { user, onRemoved }
+  }
+
+  it('refuses a minimum gap under 0.1 s with the invalid-field hint, and Remove all waits for it', async () => {
+    const { screen: part } = placeTake()
+    const { user } = await openDialog(part.id)
+    const minGap = screen.getByLabelText('Minimum gap (s)')
+    expect(minGap).toHaveAttribute('min', '0.1')
+    const removeAll = screen.getByRole('button', { name: 'Remove all' })
+
+    for (const tooShort of ['0', '0.05', '-1']) {
+      await user.clear(minGap)
+      await user.type(minGap, tooShort)
+      expect(minGap).toHaveAttribute('aria-invalid', 'true')
+      expect(screen.getByText('Enter a number from 0.1 to 60.')).toBeInTheDocument()
+      // Not found again with it, and nothing can be cut while the fields do
+      // not show the settings the list was found with.
+      expect(pauses()).toHaveLength(2)
+      expect(removeAll).toBeDisabled()
+    }
+
+    await user.clear(minGap)
+    await user.type(minGap, '0.1')
+    expect(minGap).not.toHaveAttribute('aria-invalid')
+    expect(screen.getByText('Shorter pauses are left alone.')).toBeInTheDocument()
+    expect(removeAll).toBeEnabled()
+  })
+
+  it('also disables Remove all while another field does not read', async () => {
+    const { screen: part } = placeTake()
+    const { user } = await openDialog(part.id)
+    await user.clear(screen.getByLabelText('Threshold (dBFS)'))
+    expect(screen.getByRole('button', { name: 'Remove all' })).toBeDisabled()
+  })
+
+  /**
+   * `seconds` of choppy talk: every second, 0.8 s of silence then 0.2 s of
+   * tone, so the defaults find one pause of 0.6 s a second.
+   */
+  function placeChoppy(seconds: number) {
+    const choppy: SourceVideo = {
+      id: 'choppy-src', name: 'choppy.webm', duration: seconds, width: 0, height: 0, frameRate: 0,
+      mimeType: 'audio/webm', size: 1, mediaType: 'audio', hasAudio: true, waveformSecondsPerPeak: 0.01,
+      waveformData: Array.from({ length: seconds * 100 }, (_, i) => (i % 100 < 80 ? { min: 0, max: 0 } : { min: -0.8, max: 0.8 })),
+    }
+    store().addSourceVideo(choppy)
+    store().placeTakeOnTimeline([{ sourceVideoId: choppy.id, name: 'choppy', duration: seconds, startOffset: 0, width: 0, height: 0, mediaType: 'audio' }])
+    return store().project.timeline.clips.find((c) => c.name === 'choppy')!
+  }
+
+  it('lists only the first 500 of more pauses, says how many it found, and Remove all cuts every one', async () => {
+    // Ten minutes are enough to pass the cap; the hour is measured in the docs.
+    const take = placeChoppy(600)
+    const { user, onRemoved } = await openDialog(take.id, true)
+
+    expect(store().silenceReview!.candidates).toHaveLength(600)
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '600 pauses found · 360.00 s will be cut. The list shows the first 500; Remove all cuts all 600.'
+    )
+    expect(pauses()).toHaveLength(500)
+    expect(pauses()[499]).toHaveTextContent('8:19.10 – 8:19.70')
+    // The bands are where the cuts go, so every one is drawn.
+    expect(screen.getAllByTestId('silence-band')).toHaveLength(600)
+
+    // Keep still drops the row pressed, and the next one moves up into the list.
+    await user.click(screen.getByRole('button', { name: 'Keep the pause at 0:00.10' }))
+    expect(store().silenceReview!.candidates).toHaveLength(599)
+    expect(pauses()).toHaveLength(500)
+    expect(screen.getByRole('status')).toHaveTextContent('Remove all cuts all 599.')
+
+    await user.click(screen.getByRole('button', { name: 'Remove all' }))
+    expect(onRemoved).toHaveBeenCalledWith('Removed 599 pauses (359.40 s). Ctrl+Z puts them back.')
+    // 599 cuts leave 600 pieces: every pause found was cut, not only the listed ones.
+    expect(store().project.timeline.clips.filter((c) => c.trackId === take.trackId)).toHaveLength(600)
+    // 500 rows of three buttons: about a second alone, several under the full suite's load.
+  }, 20_000)
+
+  it('draws pauses less than a pixel apart on the timeline as one band, and every band once zoomed in', () => {
+    const { screen: part } = placeTake()
+    store().setSilenceReviewClip(part.id)
+    store().setSilenceCandidates([{ start: 0, end: 1 }, { start: 1.01, end: 2 }, { start: 3, end: 4 }])
+    const bandBox = () => screen.getAllByTestId('silence-band').map((b) => [parseFloat(b.style.left), parseFloat(b.style.width)])
+    // At 50 px/s the 10 ms between the first two is half a pixel.
+    const { rerender } = render(<TimelineSilenceBands pixelsPerSecond={50} height={100} />)
+    expect(bandBox()).toEqual([[0, 100], [150, 50]])
+    rerender(<TimelineSilenceBands pixelsPerSecond={500} height={100} />)
+    expect(bandBox().map(([left, width]) => [+left.toFixed(6), +width.toFixed(6)])).toEqual([[0, 500], [505, 495], [1500, 500]])
+  })
+
+  it('lists every pause up to 500 and says nothing about a cap', async () => {
+    await openDialog(placeChoppy(500).id)
+    expect(store().silenceReview!.candidates).toHaveLength(500)
+    expect(pauses()).toHaveLength(500)
+    expect(screen.getByRole('status')).toHaveTextContent(/^500 pauses found · 300\.00 s will be cut$/)
+  }, 20_000)
+})
