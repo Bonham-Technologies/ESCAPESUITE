@@ -128,10 +128,25 @@ the first visit".
   `allow="on-device-speech-recognition"`, or the control hides on its first press. A host that
   is a bare Chromium embedder (Electron, CEF: a `Chromium` brand and no vendor brand) gets no
   control at all, because there `available()` would kill the renderer (`on-device-transcription.md`).
+  ARTIST's "Translate captions" (ESCSUITE-473) uses the `translator` and `language-detector`
+  Permissions-Policy features, also `self` by default and not named in the hosted header: a
+  cross-origin host must delegate them with `allow="translator; language-detector"`, or a press
+  finds translation unavailable. The same brand gate hides that control in a bare Chromium
+  embedder (`apps/artist/docs/reference/on-device-translation.md`).
   Keeping the screen on during exports, transcription and CRAFT recording (ESCSUITE-474) uses the
   `screen-wake-lock` feature, also `self` by default: a cross-origin host must delegate it with
   `allow="screen-wake-lock"`, or the job runs as before with the screen left to the OS settings
   and nothing is shown.
+- **Project files (`.veditor`, a host's `LOAD_PROJECT`)**: ESCSUITE-473 adds one **optional**
+  field, `timeline.tracks[i].language` (a BCP 47 tag such as `en-US` or `es`) on caption tracks
+  (`kind: 'captions'`), and a project may now hold more than one caption track. The change is
+  additive: a file without the field opens unchanged, and an older ARTIST keeps the field
+  through its load (tracks are passed through by spread) and ignores it; it does draw two caption
+  tracks on the same spot and writes both into one sidecar, since stacking and the per-track
+  sidecar are new. A present `language`
+  that is not a language tag is refused by `parseProject` with
+  `timeline.tracks[i].language must be a BCP 47 language tag`. See
+  `apps/artist/docs/reference/captions.md`.
 - **`?tabKey=<name>`** (ARTIST): the host's name for this frame, so two or more editors framed in
   one host page keep a saved session each (ESCSUITE-332). **Every host should pass one — a page that
   frames a single editor included — and a different one to each frame** when it frames several: every same-origin frame of a page shares the top-level

@@ -33,14 +33,22 @@ import {
   analyticsModule,
   recorderFactory,
   resetAppDoubles,
+  takeStoreFactory,
 } from '../test/appDoubles'
+import { TakeStorageError } from '../core/takeStore'
 import {
   installCanvasCaptureStreamDouble,
   uninstallCanvasCaptureStreamDouble,
 } from '../test/doubles/canvas'
 import { installRafDouble, type RafDouble } from '../test/doubles/raf'
 import { createStreamDouble, createTrackDouble } from '../test/doubles/mediastream'
-import { CAPTURE_UNANSWERED, SEPARATE_TRACK_NOT_SAVED } from '../utils/notices'
+import {
+  CAPTURE_UNANSWERED,
+  SEPARATE_TRACK_NOT_SAVED,
+  TAKE_NOT_CRASH_PROTECTED,
+  TAKE_PROTECTION_LOST,
+  TAKE_STORAGE_FAILED,
+} from '../utils/notices'
 // The save path's own expression, not a copy of it: if `resolveHasAudio`
 // changed, the agreement table below would change with it.
 import { resolveHasAudio, type CapturedTake } from '../utils/recordingMetadata'
@@ -63,6 +71,10 @@ const CAPTURED_DEFAULTS = {
 
 vi.mock('../core/recorder-factory', async () => (await import('../test/appDoubles')).recorderFactoryModule)
 vi.mock('@vercel/analytics', async () => (await import('../test/appDoubles')).analyticsModule)
+vi.mock('../core/takeStore', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../core/takeStore')>()),
+  createTakeStore: (await import('../test/appDoubles')).takeStoreFactory.createTakeStore,
+}))
 
 // Storage headroom is a browser fact (navigator.storage), so it is doubled.
 // The controller must not touch it on the click path — see the "no await
@@ -552,7 +564,7 @@ describe('useRecordingController a camera that could not be opened (ESCSUITE-342
     expect(harness.deps.compositorRef.current).toBeNull()
     expect(harness.setIsPiPActive).not.toHaveBeenCalledWith(true)
     expect(harness.setPreviewStream).toHaveBeenCalledWith(screen)
-    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false, true, false)
+    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false, true, false, expect.any(Object))
     expect(recorderFactory.last().initializeCalls[0].screen).toBe(screen)
   })
 
@@ -578,7 +590,7 @@ describe('useRecordingController a camera that could not be opened (ESCSUITE-342
 
     await startTake(result)
 
-    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false, true, false)
+    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false, true, false, expect.any(Object))
     const recorder = recorderFactory.last()
     await act(async () => { await result.current.handleStopRecording() })
     const [, , , captured] = harness.saveRecording.mock.calls[0] as [Blob, number, unknown, CapturedTake]
@@ -660,7 +672,7 @@ describe('useRecordingController starting a take', () => {
     expect(useRecorderStore.getState().screenStream).toBe(harness.streams.screen)
     expect(harness.setPreviewStream).toHaveBeenCalledWith(harness.streams.screen)
     expect(harness.setIsPiPActive).not.toHaveBeenCalled()
-    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false, true, false)
+    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false, true, false, expect.any(Object))
     expect(recorderFactory.last().start).toHaveBeenCalledTimes(1)
     expect(state()).toBe('recording')
     expect(analyticsModule.track).toHaveBeenCalledWith('Recording Started', undefined)
@@ -690,7 +702,7 @@ describe('useRecordingController starting a take', () => {
 
     await startTake(result)
 
-    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false, false, false)
+    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false, false, false, expect.any(Object))
     expect(recorderFactory.last().hasVideoSource).toBe(false)
     // The label useRecordingSave keys the WebM metadata repair off: a
     // MediaRecorder take needs it even on a WebCodecs-capable machine.
@@ -1447,7 +1459,8 @@ describe('useRecordingController picture-in-picture', () => {
       expect.any(Object),
       true,
       true,
-      false
+      false,
+      expect.any(Object)
     )
 
     // The recorder gets the composited video plus the screen's own audio.
@@ -2935,6 +2948,136 @@ describe('useRecordingController a capture request the browser never answers', (
     expect(state()).toBe('countdown')
     act(() => { vi.advanceTimersByTime(3000) })
     expect(recorderFactory.last().start).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ESCSUITE-466: every take is also kept on the device as it records, and the
+// controller decides what becomes of that copy: deleted when the user threw
+// the take away or the library has it, kept for the recovery prompt whenever
+// the app lost it.
+describe('useRecordingController keeping the take on the device (ESCSUITE-466)', () => {
+  const lastStore = () => takeStoreFactory.last()
+
+  it('starts a store for each take, describing it, and hands it to the recorder', async () => {
+    const { recorder } = await startLiveTake()
+    const store = lastStore()
+    expect(recorder.takeStore).toBe(store)
+    expect(store.journal).toEqual({
+      version: 1,
+      takeId: expect.any(String),
+      startedAt: expect.any(Number),
+      recorder: 'mediarecorder',
+      captured: { micAcquired: false, separateTracks: false, ...CAPTURED_DEFAULTS },
+      systemAudioShared: true,
+    })
+    await act(async () => {})
+    expect(useRecorderStore.getState().notice).toBeNull()
+  })
+
+  it('says the take is not crash-protected where the browser cannot keep it, into a free channel only', async () => {
+    takeStoreFactory.available = false
+    await startLiveTake()
+    await act(async () => {})
+    expect(useRecorderStore.getState().notice).toBe(TAKE_NOT_CRASH_PROTECTED)
+
+    // A notice that names something the take is missing keeps the channel.
+    takeStoreFactory.available = false
+    const view = mountController({ countdownSeconds: 0, microphoneEnabled: true }, { mic: null, micUnavailable: true })
+    await startTake(view.result)
+    await act(async () => {})
+    expect(useRecorderStore.getState().notice).not.toBe(TAKE_NOT_CRASH_PROTECTED)
+    expect(useRecorderStore.getState().notice).not.toBeNull()
+  })
+
+  it('deletes the copy once a stopped take is saved', async () => {
+    const { result } = await startLiveTake()
+    await act(async () => { await result.current.handleStopRecording() })
+    expect(lastStore().discard).toHaveBeenCalledTimes(1)
+    expect(lastStore().release).not.toHaveBeenCalled()
+  })
+
+  it('keeps the copy for recovery when the save fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { result } = await startLiveTake()
+    harness.saveRecording.mockRejectedValue(new Error('quota exceeded'))
+    await act(async () => { await result.current.handleStopRecording() })
+    expect(lastStore().release).toHaveBeenCalledTimes(1)
+    expect(lastStore().discard).not.toHaveBeenCalled()
+  })
+
+  it('a stopped take is the save\'s: tearing down afterwards does not touch its copy', async () => {
+    let finishSave!: () => void
+    const { result, unmount } = await startLiveTake()
+    harness.saveRecording.mockImplementation(() => new Promise<void>((resolve) => (finishSave = resolve)))
+    await act(async () => { await result.current.handleStopRecording() })
+    unmount()
+    expect(lastStore().release).not.toHaveBeenCalled()
+    await act(async () => { finishSave() })
+    expect(lastStore().discard).toHaveBeenCalledTimes(1)
+  })
+
+  it('deletes the copy of a take that is cancelled, live or in its countdown', async () => {
+    const { result } = await startLiveTake()
+    act(() => { result.current.handleCancelRecording() })
+    expect(lastStore().discard).toHaveBeenCalledTimes(1)
+
+    const view = mountController({ countdownSeconds: 3 })
+    await startTake(view.result)
+    act(() => { view.result.current.cancelCountdown() })
+    expect(lastStore().discard).toHaveBeenCalledTimes(1)
+    expect(lastStore().release).not.toHaveBeenCalled()
+  })
+
+  it('keeps the copy when a started take fails, and says so when the disk was why', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { recorder } = await startLiveTake()
+    act(() => { recorder.failWith(new TakeStorageError('QuotaExceededError')) })
+    expect(lastStore().release).toHaveBeenCalledTimes(1)
+    expect(useRecorderStore.getState().notice).toBe(TAKE_STORAGE_FAILED)
+  })
+
+  it('deletes the copy when a take fails before it ever started', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const view = mountController({ countdownSeconds: 3 })
+    await startTake(view.result)
+    act(() => { recorderFactory.last().failWith(new Error('encoder died')) })
+    expect(lastStore().discard).toHaveBeenCalledTimes(1)
+    expect(lastStore().release).not.toHaveBeenCalled()
+  })
+
+  it('deletes the copy when the take fails to start', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    recorderFactory.nextInitializeError = new Error('no encoder')
+    const view = mountController({ countdownSeconds: 0 })
+    await startTake(view.result)
+    expect(lastStore().discard).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the copy when the screen goes away mid-take', async () => {
+    const { unmount } = await startLiveTake()
+    unmount()
+    expect(lastStore().release).toHaveBeenCalledTimes(1)
+    expect(lastStore().discard).not.toHaveBeenCalled()
+  })
+
+  it('a MediaRecorder take whose copy stops being written says it lost its protection, while it is live', async () => {
+    const { result } = await startLiveTake()
+    const store = lastStore()
+    act(() => { store.failWith(new TakeStorageError('QuotaExceededError')) })
+    expect(useRecorderStore.getState().notice).toBe(TAKE_PROTECTION_LOST)
+    expect(state()).toBe('recording')
+
+    act(() => { result.current.handleCancelRecording() })
+    act(() => { useRecorderStore.getState().setNotice(null) })
+    act(() => { store.failWith(new TakeStorageError('late')) })
+    expect(useRecorderStore.getState().notice).toBeNull()
+  })
+
+  it('a WebCodecs take leaves its storage failure to the recorder', async () => {
+    recorderFactory.recorderType = 'webcodecs'
+    await startLiveTake()
+    act(() => { lastStore().failWith(new TakeStorageError('QuotaExceededError')) })
+    expect(useRecorderStore.getState().notice).toBeNull()
   })
 })
 

@@ -942,3 +942,35 @@ describe('useRecordingSave for a separate-tracks take', () => {
     expect(notices).toEqual([SEPARATE_TRACK_NOT_SAVED])
   })
 })
+
+// ESCSUITE-466: a take recovered from the device after its page died is
+// saved through the same path, from what its journal kept.
+describe('useRecordingSave for a recovered take', () => {
+  const RECOVERED = { createdAt: 1_700_000_000_000, systemAudioShared: false }
+
+  it('stores it as repaired, dated when it was recorded, with its own system-audio answer', async () => {
+    const { result } = mountSave()
+    // This tab's own state must not leak into a take from another visit.
+    capturedThumbnailRef.current = new Blob(['this-tab-preview'])
+    useRecorderStore.setState({ systemAudioShared: true })
+
+    await result.current(RAW, 6, null, captured({ systemAudioEnabled: true }), RECOVERED)
+
+    expect(converterModule.fixWebMMetadata).not.toHaveBeenCalled()
+    expect(thumbnailModule.extractVideoMetadata).toHaveBeenCalledWith(RAW, 6)
+    expect(thumbnailModule.generateThumbnail).toHaveBeenCalledWith(RAW)
+    expect(capturedThumbnailRef.current).not.toBeNull()
+    const [meta] = await getRecordingsMetadata()
+    expect(meta.recordedAt).toBe(RECOVERED.createdAt)
+    expect(meta.hasAudio).toBe(false)
+    expect(added[0].createdAt).toBe(RECOVERED.createdAt)
+  })
+
+  it('takes the system audio as shared when the journal says it was', async () => {
+    const { result } = mountSave()
+    useRecorderStore.setState({ systemAudioShared: false })
+    await result.current(RAW, 6, null, captured({ systemAudioEnabled: true }), { ...RECOVERED, systemAudioShared: true })
+    const [meta] = await getRecordingsMetadata()
+    expect(meta.hasAudio).toBe(true)
+  })
+})

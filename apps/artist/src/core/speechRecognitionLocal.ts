@@ -100,7 +100,7 @@ const SPEECH_SERVICE_BRANDS = ['Google Chrome', 'Microsoft Edge', 'Opera', 'Brav
  * non-secure context) there is nothing to read, so nothing is gated here; the
  * control still asks `available()` only when pressed.
  */
-function isBareChromiumEmbedder(win: SpeechWindow): boolean {
+export function isBareChromiumEmbedder(win: SpeechWindow): boolean {
   const brands = win.navigator?.userAgentData?.brands;
   if (!Array.isArray(brands)) return false;
   const names = brands.map((entry) => entry?.brand);

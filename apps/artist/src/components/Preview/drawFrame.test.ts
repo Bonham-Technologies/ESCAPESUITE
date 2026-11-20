@@ -74,6 +74,52 @@ describe('drawPreviewFrame — a caption (ESCSUITE-293)', () => {
   })
 })
 
+// ESCSUITE-473: a translated caption track copies its source's position, so
+// two visible caption tracks with cues up at once are stacked — the source
+// (higher in the timeline) above, the translation (directly below it) below —
+// rather than drawn on the same spot. Hiding either puts the other back.
+describe('drawPreviewFrame — two caption tracks (ESCSUITE-473)', () => {
+  const size = { width: 640, height: 360 }
+  const style = captionStyleFor(size)
+  const cue = (id: string, trackId: string, text: string) =>
+    makeClip({
+      id, sourceVideoId: '', trackId, overlayType: 'text',
+      textData: { ...DEFAULT_TEXT_OVERLAY_DATA, ...style, text },
+      timelinePosition: 1, duration: 2, endTime: 2,
+    })
+  const scene = (translationVisible = true): PreviewFrameScene => ({
+    projectSize: size,
+    clips: [cue('en', 'captions', 'Hello'), cue('es', 'spanish', 'Hola')],
+    tracks: [
+      makeTrack(),
+      makeTrack({ id: 'captions', name: 'Captions', index: 2, kind: 'captions', language: 'en' }),
+      makeTrack({ id: 'spanish', name: 'Captions (Spanish)', index: 1, kind: 'captions', language: 'es', visible: translationVisible }),
+    ],
+    sourceVideos: [],
+    editingTextClipId: null,
+  })
+  const yDrawn = (time: number, s: PreviewFrameScene): Record<string, number> => {
+    const ctx: RecordingCanvasRenderingContext2D = createRecordingContext()
+    ctx.canvas.width = size.width
+    ctx.canvas.height = size.height
+    drawPreviewFrame(ctx as unknown as CanvasRenderingContext2D, ctx.canvas, time, s, {
+      videoElements: new Map(), slots: slotsAt(time, s), imageElements: new Map(), blurScratch: { current: null },
+    })
+    return Object.fromEntries(ctx.argsFor('fillText').map((args) => [args[0] as string, args[2] as number]))
+  }
+
+  it('draws the translation in the caption spot and the original above it, without overlapping', () => {
+    const y = yDrawn(1.5, scene())
+    expect(y.Hola).toBeCloseTo(style.y * size.height, 6)
+    // A one-line caption's box is 1.8 font sizes tall (its line and the background padding).
+    expect(y.Hola - y.Hello).toBeGreaterThanOrEqual(1.8 * style.fontSize)
+  })
+
+  it('draws the original in its own place once the translation is hidden', () => {
+    expect(yDrawn(1.5, scene(false))).toEqual({ Hello: style.y * size.height })
+  })
+})
+
 // ESCSUITE-313: two clips of one source in one frame draw from two elements —
 // the k-th live clip of a source from that source's k-th element, which
 // `usePreviewMedia` keeps in `extraVideoElements` (slot 1 onwards).

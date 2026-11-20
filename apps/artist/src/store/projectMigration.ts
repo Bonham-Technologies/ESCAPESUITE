@@ -334,6 +334,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Whether `value` is a well-formed BCP 47 language tag (ESCSUITE-473): a
+ * string `Intl.getCanonicalLocales` accepts. The tag is kept as written.
+ */
+function isLanguageTag(value: unknown): value is string {
+  if (typeof value !== 'string' || value === '') return false;
+  try {
+    return Intl.getCanonicalLocales(value).length === 1;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Why a legacy overlay array cannot be folded into clips, or `null` when it
  * can (ESCSUITE-294). Any falsy value (absent, `null`, `false`, `0`, `''`) is no
  * overlays at all, as the migration's `|| []` already treats it; anything else
@@ -569,6 +582,10 @@ export function parseProject(input: unknown, editorInput?: unknown): ParseProjec
     // ESCSUITE-293: the caption-track marker. Absent is every ordinary track.
     if (track.kind !== undefined && track.kind !== 'captions') {
       return { ok: false, reason: `timeline.tracks[${i}].kind must be 'captions'` };
+    }
+    // ESCSUITE-473: a caption track's language. Absent on every older file.
+    if (track.language !== undefined && !isLanguageTag(track.language)) {
+      return { ok: false, reason: `timeline.tracks[${i}].language must be a BCP 47 language tag` };
     }
   }
   const legacyProblem = legacyOverlaysProblem(timeline.textOverlays, 'textOverlays', 'text')

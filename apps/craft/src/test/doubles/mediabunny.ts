@@ -32,6 +32,8 @@ export interface MediabunnyState {
   videoSources: PacketSourceDouble[]
   audioSources: PacketSourceDouble[]
   targets: BufferTargetDouble[]
+  /** Every `StreamTarget` made: a take kept on disk (ESCSUITE-466). */
+  streamTargets: StreamTargetDouble[]
   formats: OutputFormatDouble[]
   /** Ordered log of the lifecycle calls made across every object. */
   callLog: string[]
@@ -56,6 +58,7 @@ const state: MediabunnyState = {
   videoSources: [],
   audioSources: [],
   targets: [],
+  streamTargets: [],
   formats: [],
   callLog: [],
   finalizedByteLength: 128,
@@ -70,6 +73,25 @@ export class BufferTargetDouble {
 
   constructor() {
     state.targets.push(this)
+  }
+}
+
+/**
+ * A `StreamTarget`: the muxer writes into a WritableStream at positions
+ * instead of keeping a buffer. On finalize the double writes
+ * `finalizedByteLength` bytes to it at position 0, as one chunk.
+ */
+export class StreamTargetDouble {
+  readonly writable: WritableStream<{ type: 'write'; data: Uint8Array; position: number }>
+  readonly options: unknown
+
+  constructor(
+    writable: WritableStream<{ type: 'write'; data: Uint8Array; position: number }>,
+    options?: unknown
+  ) {
+    this.writable = writable
+    this.options = options
+    state.streamTargets.push(this)
   }
 }
 
@@ -101,7 +123,7 @@ export class PacketSourceDouble {
 export class OutputDouble {
   readonly tracks: AddedTrack[] = []
   readonly format: OutputFormatDouble
-  readonly target: BufferTargetDouble
+  readonly target: BufferTargetDouble | StreamTargetDouble
   startCalls = 0
   finalizeCalls = 0
   cancelCalls = 0
@@ -114,7 +136,7 @@ export class OutputDouble {
    */
   state: 'pending' | 'started' | 'canceled' | 'finalizing' | 'finalized' = 'pending'
 
-  constructor(options: { format: OutputFormatDouble; target: BufferTargetDouble }) {
+  constructor(options: { format: OutputFormatDouble; target: BufferTargetDouble | StreamTargetDouble }) {
     this.format = options.format
     this.target = options.target
     state.outputs.push(this)
@@ -154,7 +176,13 @@ export class OutputDouble {
       throw state.finalizeError
     }
     if (state.producesBuffer) {
-      this.target.buffer = new ArrayBuffer(state.finalizedByteLength)
+      if (this.target instanceof StreamTargetDouble) {
+        const writer = this.target.writable.getWriter()
+        await writer.write({ type: 'write', data: new Uint8Array(state.finalizedByteLength), position: 0 })
+        await writer.close()
+      } else {
+        this.target.buffer = new ArrayBuffer(state.finalizedByteLength)
+      }
     }
     this.state = 'finalized'
   })
@@ -195,6 +223,7 @@ export function createMediabunnyDouble() {
   return {
     Output: OutputDouble,
     BufferTarget: BufferTargetDouble,
+    StreamTarget: StreamTargetDouble,
     Mp4OutputFormat: class Mp4OutputFormat extends OutputFormatDouble {
       constructor(options?: unknown) {
         super('mp4', options)
@@ -245,6 +274,7 @@ export function resetMediabunnyDouble(): void {
   state.videoSources.length = 0
   state.audioSources.length = 0
   state.targets.length = 0
+  state.streamTargets.length = 0
   state.formats.length = 0
   state.callLog.length = 0
   state.finalizedByteLength = 128

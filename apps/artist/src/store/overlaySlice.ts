@@ -5,7 +5,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import type { StateCreator } from 'zustand';
-import type { EditorState, Clip, TextOverlayData, ShapeOverlayData } from './types';
+import type { EditorState, Clip, TextOverlayData, ShapeOverlayData, Track } from './types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION, DEFAULT_TEXT_OVERLAY_DATA, DEFAULT_SHAPE_OVERLAY_DATA } from './types';
 import { pushToHistory } from './storeHistory';
 import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './projectFactory';
@@ -14,7 +14,12 @@ import { pruneSelection } from './selectionPrune';
 
 export type OverlaySlice = Pick<
   EditorState,
-  'addTextOverlayClip' | 'addShapeOverlayClip' | 'addCaptionCues' | 'updateTextOverlayData' | 'updateShapeOverlayData'
+  | 'addTextOverlayClip'
+  | 'addShapeOverlayClip'
+  | 'addCaptionCues'
+  | 'addCaptionTranslation'
+  | 'updateTextOverlayData'
+  | 'updateShapeOverlayData'
 >;
 
 export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice> = (set, get) => ({
@@ -185,9 +190,21 @@ export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice>
 
     let tracks = currentTracks;
     let captionTrack = existing;
+    const language = options?.language;
     if (!captionTrack) {
-      captionTrack = { ...createTrackAtTop(currentTracks, 'Captions'), kind: 'captions' };
+      captionTrack = {
+        ...createTrackAtTop(currentTracks, 'Captions'),
+        kind: 'captions',
+        ...(language ? { language } : {}),
+      };
       tracks = [...currentTracks, captionTrack];
+    } else if (language && (options?.replace || !captionTrack.language) && captionTrack.language !== language) {
+      // ESCSUITE-473: the track says what language its words are in. Replace
+      // makes the cues all the new language; an add only names a track whose
+      // language was not known (an imported file's).
+      const named: Track = { ...captionTrack, language };
+      tracks = currentTracks.map((track) => (track.id === named.id ? named : track));
+      captionTrack = named;
     }
     const trackId = captionTrack.id;
 
@@ -232,6 +249,76 @@ export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice>
         },
       },
       ...(kept !== clips ? pruneSelection(newClips, state.selectedClipId, state.selectedClipIds) : {}),
+      history: pushToHistory(state),
+    });
+
+    return { trackId, added: added.length };
+  },
+
+  // ESCSUITE-473: "Translate captions". The translation is a caption track of
+  // its own, so each language can be shown, hidden, burned in and written as a
+  // sidecar on its own. Every new clip is a deep copy of the source cue it
+  // translates — position, length, style, keyframes — holding the new text,
+  // so the timing is the source's to the bit. The track goes directly below
+  // the source in the timeline (every track from the source up moves up one),
+  // which is what `stackCaptions` reads as "below it in the frame". It is
+  // appended to the list, so the source stays the first caption track, the
+  // one imports and transcription use.
+  addCaptionTranslation: (sourceTrackId, translations, { language, trackName, sourceLanguage }) => {
+    const state = get();
+    const { tracks: currentTracks, clips } = state.project.timeline;
+    const source = currentTracks.find((track) => track.id === sourceTrackId);
+    if (!source) return null;
+    const sourceCues = new Map(
+      clips
+        .filter((clip) => clip.trackId === sourceTrackId && clip.overlayType === 'text' && clip.textData)
+        .map((clip) => [clip.id, clip])
+    );
+    const trackId = uuidv4();
+    const added: Clip[] = [];
+    for (const { clipId, text } of translations) {
+      const cue = sourceCues.get(clipId);
+      if (!cue) continue;
+      const copy = structuredClone(cue);
+      delete copy.linkGroupId;
+      added.push({ ...copy, id: uuidv4(), trackId, name: text, textData: { ...copy.textData!, text } });
+    }
+    if (added.length === 0) return null;
+
+    const translationTrack: Track = {
+      id: trackId,
+      name: trackName,
+      index: source.index,
+      visible: true,
+      locked: false,
+      muted: false,
+      volume: 1,
+      height: source.height,
+      kind: 'captions',
+      language,
+    };
+    const tracks = [
+      ...currentTracks.map((track) => {
+        const moved = track.index >= source.index ? { ...track, index: track.index + 1 } : track;
+        return track.id === sourceTrackId && sourceLanguage && !track.locked && track.language !== sourceLanguage
+          ? { ...moved, language: sourceLanguage }
+          : moved;
+      }),
+      translationTrack,
+    ];
+    const newClips = [...clips, ...added];
+
+    set({
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...state.project.timeline,
+          tracks,
+          clips: newClips,
+          duration: calculateTimelineDuration(newClips),
+        },
+      },
       history: pushToHistory(state),
     });
 

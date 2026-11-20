@@ -1,6 +1,7 @@
 import { Recorder, type RecorderCallbacks } from './recorder';
 import { WebCodecsRecorder, type WebCodecsRecorderCallbacks } from './webcodecs-recorder';
 import { canRecordSeparateTracks, isWebCodecsRecordingSupported } from './webcodecsSupport';
+import type { TakeStore } from './takeStore';
 
 export type AnyRecorder = Recorder | WebCodecsRecorder;
 export type AnyRecorderCallbacks = RecorderCallbacks | WebCodecsRecorderCallbacks;
@@ -47,21 +48,25 @@ export function canUseWebCodecsRecorder(
  * @param hasVideoSource - Whether the take captures screen or webcam at all
  *   (an audio-only take forces MediaRecorder)
  * @param separateTracks - Whether the webcam is recorded as its own file
+ * @param takeStore - Where the take is kept on disk as it records
+ *   (ESCSUITE-466), handed to whichever recorder is built; null keeps it in
+ *   memory only
  */
 export function createRecorder(
   callbacks: AnyRecorderCallbacks,
   isPiP: boolean = false,
   hasVideoSource: boolean = true,
-  separateTracks: boolean = false
+  separateTracks: boolean = false,
+  takeStore: TakeStore | null = null
 ): AnyRecorder {
   if (canUseWebCodecsRecorder(isPiP, hasVideoSource, separateTracks)) {
     console.log(
       `Using WebCodecs-based recorder (seekable output)${separateTracks ? ' (separate tracks)' : ''}`
     );
-    return new WebCodecsRecorder(callbacks);
+    return new WebCodecsRecorder(callbacks, { takeStore });
   } else {
     console.log(`Using MediaRecorder-based recorder${isPiP ? ' (PiP mode)' : ''}`);
-    return new Recorder(callbacks);
+    return new Recorder(callbacks, { takeStore });
   }
 }
 
