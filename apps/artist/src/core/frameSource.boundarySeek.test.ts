@@ -44,6 +44,25 @@ const ENGINES: Engine[] = [
   },
 ];
 
+/**
+ * ESCSUITE-495: a WebM timecode holds whole milliseconds, so a source's frame
+ * starts are stored rounded to the nearest one — a 30 fps frame at 66.67 ms
+ * at 67 ms, a third of a millisecond late — and the element shows the frame
+ * whose stored start is at or before the seek. Each engine above, reading such
+ * a file.
+ */
+const MS_ROUNDED: Engine[] = ENGINES.map((engine) => ({
+  name: `${engine.name.split(' (')[0]} reading millisecond timecodes`,
+  request: engine.request,
+  frameStart: (k, rate) => Math.round((k / rate) * 1e3) * 1e3,
+}));
+
+/** Frame rates a source is commonly recorded or rendered at, NTSC ones included. */
+const SOURCE_RATES = [24000 / 1001, 24, 25, 30000 / 1001, 30, 50, 60000 / 1001, 60, 120, 240];
+
+/** The bias the 0.1 ms one was (ESCSUITE-265), which a millisecond timecode defeats. */
+const PREVIOUS_BIAS = 1e-4;
+
 /** A paused `<video>` of a `rate` fps source that shows the frame its engine resolves a seek to. */
 class QuantisingVideo extends EventTarget {
   readyState = 4;
@@ -81,13 +100,57 @@ describe('elementSeekTarget', () => {
     expect(elementSeekTarget(1.5)).toBe(1.5 + ELEMENT_SEEK_BIAS);
   });
 
-  it('keeps the bias far inside one frame even at 240 fps', () => {
-    expect(ELEMENT_SEEK_BIAS).toBeLessThan(1 / 240 / 10);
+  it('moves it past the half millisecond a timecode rounded to the millisecond can be late (ESCSUITE-495)', () => {
+    expect(ELEMENT_SEEK_BIAS).toBeGreaterThan(0.5e-3 + 1e-6);
+  });
+
+  it('keeps the bias inside a quarter of a frame even at 240 fps', () => {
+    expect(ELEMENT_SEEK_BIAS).toBeLessThan(1 / 240 / 4);
+  });
+
+  /** The frame an engine shows for a seek to `seconds` in a `rate` fps source. */
+  function shownFrame(engine: Engine, rate: number, seconds: number): number {
+    const requested = engine.request(seconds);
+    let k = 0;
+    while (engine.frameStart(k + 1, rate) <= requested) k++;
+    return k;
+  }
+
+  for (const engine of [...ENGINES, ...MS_ROUNDED]) {
+    it(`lands a request on a frame's start, half way in, or 2 ms before the next on that frame: ${engine.name}`, () => {
+      const wrong: string[] = [];
+      for (const rate of SOURCE_RATES) {
+        // 2 ms before the next frame: the bias, plus the half millisecond its
+        // timecode can be early, plus room for the engine's microsecond.
+        const offsets = [0, 0.5 / rate, 1 / rate - 2e-3];
+        for (let k = 0; k < Math.ceil(rate * 3); k++) {
+          for (const offset of offsets) {
+            const shown = shownFrame(engine, rate, elementSeekTarget(k / rate + offset));
+            if (shown !== k) wrong.push(`${rate.toFixed(3)} fps, frame ${k} + ${offset * 1e3} ms: showed ${shown}`);
+          }
+        }
+      }
+      expect(wrong).toEqual([]);
+    });
+  }
+
+  it('treats a request within the bias before a frame start as that frame', () => {
+    expect(shownFrame(ENGINES[0], 30, elementSeekTarget(1 - 0.9e-3))).toBe(30);
+    expect(shownFrame(ENGINES[0], 30, elementSeekTarget(1 - 1.1e-3))).toBe(29);
+  });
+
+  it('the 0.1 ms bias showed the frame before a third of a 30 fps WebM source’s frames, which is the bug', () => {
+    for (const engine of MS_ROUNDED) {
+      const early = Array.from({ length: 90 }, (_, k) => k).filter(
+        (k) => shownFrame(engine, 30, k / 30 + PREVIOUS_BIAS) !== k
+      );
+      expect(early).toEqual(Array.from({ length: 30 }, (_, i) => 3 * i + 2));
+    }
   });
 });
 
-describe('HTMLVideoFrameSource on a frame start (ESCSUITE-265)', () => {
-  for (const engine of ENGINES) {
+describe('HTMLVideoFrameSource on a frame start (ESCSUITE-265, ESCSUITE-495)', () => {
+  for (const engine of [...ENGINES, ...MS_ROUNDED]) {
     for (const rate of [30, 60]) {
       for (const start of [0, 0.5]) {
         it(`shows the requested frame for every 1/30 s request: ${engine.name}, ${rate} fps source, clip from ${start} s`, async () => {
