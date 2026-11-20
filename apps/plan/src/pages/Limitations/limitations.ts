@@ -93,6 +93,22 @@ export const LIMITATIONS: Limitation[] = [
     ],
   },
   {
+    id: 'unfinished-recordings',
+    title: 'Recovering an unfinished recording: what it needs and what it can lose',
+    body: [
+      'ESCAPECRAFT keeps each recording on your device while it records, in the browser’s private storage for the site. If the tab closes or crashes, or the recording ends in an error before it is saved, ESCAPECRAFT offers it back the next time you open it. You can then recover what was recorded into your library, or discard it.',
+      'A recovered recording can be missing its last few seconds. The recording is written to the device about once a second and made safe on disk every 2 seconds, so a tab that closes or crashes can lose the last second or so, and a power cut or computer crash a little more.',
+      'It needs a browser that lets the page write to the site’s private storage from the background. Where it cannot, for example in some private windows or when ESCAPECRAFT is opened as a file on your computer, ESCAPECRAFT records in memory as before and says the recording is not protected if the tab closes. The same applies in a browser whose built-in recorder writes MP4 rather than WebM, such as older versions of Safari, to a recording of the screen with the webcam overlaid on it and to a sound-only recording: only WebM can be recovered.',
+      'While a recording is being saved it briefly takes about twice its size in storage: the copy kept while recording is deleted once the recording is in your library. If storage runs out during a recording, ESCAPECRAFT says so. Depending on the kind of recording, it either stops and keeps what was recorded, or keeps recording in memory without this protection. Recovering a recording needs about its size free in storage again, so free up some space first.',
+      'Clearing your browser’s data for the site deletes an unfinished recording too. Nothing is uploaded: the copy stays on your device.',
+    ],
+    sources: [
+      repoFile('apps/craft/docs/reference/crash-safe-takes.md'),
+      repoFile('apps/craft/src/core/takeStore.ts'),
+      ticket('ESCSUITE-466'),
+    ],
+  },
+  {
     id: 'safari-seven-day-eviction',
     title: 'Safari can delete stored recordings and projects after seven days away',
     body: [
@@ -128,6 +144,20 @@ export const LIMITATIONS: Limitation[] = [
       repoFile('apps/artist/docs/reference/on-device-transcription.md'),
       repoFile('apps/artist/src/core/speechRecognitionLocal.ts'),
       ticket('ESCSUITE-404'),
+    ],
+  },
+  {
+    id: 'translate-captions',
+    title: 'Translate captions: only where the browser has on-device translation',
+    body: [
+      'ESCAPEARTIST’s Translate captions uses your browser’s own on-device translation, so the button appears only where the browser has it. Today that means Chrome on a computer, from version 138; another browser shows it once it has the same feature. Phones do not have it, and Chromium-based apps that do not identify as Chrome, Edge, Opera or Brave never show it. It translates the captions into a second caption track in the language you pick, with the same timing; you can show, hide and export each language on its own.',
+      'The first time you translate between two languages, your browser may download a translation model for that pair. ESCAPEARTIST asks first, with a notice that names both languages, such as “Your browser will download a translation model for English to Spanish once. Your captions never leave this device.” Nothing is downloaded until you confirm, and Cancel downloads nothing. The browser downloads the model itself, from wherever its maker provides it (Chrome gets it from Google). ESCAPEARTIST does not choose, see or pass on that download. Translating makes no network request of its own: ESCAPEARTIST downloads nothing for it and sends no captions anywhere.',
+      'Without a network, translation works only if the model for that pair of languages is already installed in that browser profile.',
+    ],
+    sources: [
+      repoFile('apps/artist/docs/reference/on-device-translation.md'),
+      repoFile('apps/artist/src/core/translatorLocal.ts'),
+      ticket('ESCSUITE-473'),
     ],
   },
   {

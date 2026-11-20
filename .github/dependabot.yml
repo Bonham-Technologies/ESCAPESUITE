@@ -38,6 +38,7 @@ updates:
           - "fake-indexeddb"
           - "jsdom"
           - "@playwright/test"
+          - "playwright"
           - "@axe-core/*"
           - "wait-on"
       linting:

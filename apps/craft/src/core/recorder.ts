@@ -3,6 +3,7 @@
 import { getSupportedAudioMimeType, getSupportedMimeType, stopStream } from './permissions';
 import { startAudioContext } from './audioContextStart';
 import type { AudioLevels, RecorderStopCallback, RecordingConfig } from '../store/types';
+import type { TakeStore } from './takeStore';
 
 export interface RecorderCallbacks {
   onStart?: () => void;
@@ -18,7 +19,20 @@ export interface RecorderCallbacks {
   onAudioLevels?: (levels: AudioLevels) => void;
 }
 
+export interface RecorderOptions {
+  /**
+   * Where the take is kept on disk as it records (ESCSUITE-466). Every chunk
+   * MediaRecorder delivers is appended to it as well as kept in memory: the
+   * in-memory copy is still what `onStop` delivers, so a store that is
+   * unavailable or fails costs the take nothing but its crash protection.
+   * The controller owns it — finishing, keeping or deleting it is not this
+   * class's business.
+   */
+  takeStore?: TakeStore | null;
+}
+
 export class Recorder {
+  private readonly takeStore: TakeStore | null;
   private mediaRecorder: MediaRecorder | null = null;
   private chunks: Blob[] = [];
   private combinedStream: MediaStream | null = null;
@@ -36,8 +50,9 @@ export class Recorder {
   private pauseStartTime: number = 0;
   private trackEndedHandlers: Map<MediaStreamTrack, () => void> = new Map();
 
-  constructor(callbacks: RecorderCallbacks = {}) {
+  constructor(callbacks: RecorderCallbacks = {}, options: RecorderOptions = {}) {
     this.callbacks = callbacks;
+    this.takeStore = options.takeStore ?? null;
   }
 
   /**
@@ -165,6 +180,8 @@ export class Recorder {
     this.mediaRecorder.ondataavailable = (event) => {
       if (event.data.size > 0) {
         this.chunks.push(event.data);
+        // The same Blob, not a copy: the worker reads it and appends it.
+        this.takeStore?.write('primary', event.data);
       }
     };
 

@@ -21,6 +21,7 @@ import type { MediaDrawOptions, TransitionModifiers } from '../../core/exportTyp
 import { openOutputFrame } from '../../core/outputTransform';
 import { videoForSlot } from '../../core/elementSlots';
 import { getClipsAtTime } from '../../store/projectStore';
+import { stackCaptions } from '../../core/captionStack';
 import { getAnimatedValues } from '../../utils/animation';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
 import type { Clip, SourceVideo, Track } from '../../store/types';
@@ -316,7 +317,8 @@ export function drawPreviewFrame(
   const activeTransition = getActiveTransition(clips, tracks, time);
 
   // Get active clips at this time
-  const activeClips = getClipsAtTime(clips, tracks, time);
+  // ESCSUITE-473: two visible caption tracks stack rather than overlap.
+  const activeClips = stackCaptions(getClipsAtTime(clips, tracks, time), projectSize.height);
 
   // Which of its source's elements each live clip draws from: the render
   // loop's own assignment (ESCSUITE-313, ESCSUITE-323, `core/elementSlots.ts`).

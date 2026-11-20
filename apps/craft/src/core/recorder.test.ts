@@ -975,6 +975,25 @@ describe('Recorder', () => {
       // that the total happens to be non-zero.
       expect(resultBlob.size).toBe(9)
     })
+
+    it('appends every non-empty chunk to the take store too, and still delivers the take from memory (ESCSUITE-466)', async () => {
+      const { createTakeStoreFactoryDouble } = await import('../test/doubles/takeStore')
+      const store = createTakeStoreFactoryDouble().createTakeStore({ takeId: 't' } as never)
+      const kept = new Recorder(callbacks, { takeStore: store })
+      await kept.initialize(mockScreenStream, null, mockMicStream, defaultConfig)
+      kept.start()
+
+      const mediaRecorder = getMediaRecorder(kept)
+      const chunk = new Blob(['chunk-a'])
+      mediaRecorder.ondataavailable?.({ data: chunk } as BlobEvent)
+      mediaRecorder.ondataavailable?.({ data: new Blob([]) } as BlobEvent)
+      kept.stop()
+
+      await vi.waitFor(() => expect(callbacks.onStop).toHaveBeenCalled())
+      const writes = (store as unknown as { writes: Array<{ part: string; data: Blob }> }).writes
+      expect(writes).toEqual([{ part: 'primary', data: chunk, position: undefined }])
+      expect(vi.mocked(callbacks.onStop).mock.calls[0][0].size).toBe(7)
+    })
   })
 
   describe('track ended handling', () => {

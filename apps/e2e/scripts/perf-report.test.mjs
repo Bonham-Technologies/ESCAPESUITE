@@ -149,6 +149,7 @@ test('mergeBenchmarks: a complete run orders every arm the documented way, kit l
     'export-mp4',
     'craft-composite-mp4-conversion',
     'craft-pip-recording',
+    'craft-take-memory',
     'craft-separate-tracks-recording',
   ]
   const browserResults = names
@@ -170,6 +171,7 @@ test('mergeBenchmarks: a complete run orders every arm the documented way, kit l
       'craft-separate-tracks-recording',
       'craft-mp4-conversion',
       'craft-composite-mp4-conversion',
+      'craft-take-memory',
       'headless-kit-render',
     ]
   )
