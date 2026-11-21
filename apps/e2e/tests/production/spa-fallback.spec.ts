@@ -14,9 +14,9 @@ import { withoutRouteHead } from '../../utils/routeHead'
  * rewrite table from `vercel.json` itself (see `serve-dist.test.mjs`'s
  * drift-guard test), so a genuine miss — a path actually excluded from the
  * catch-all (its first segment literally `assets`, or the file `favicon.ico`) that isn't
- * on disk either — reaches `dist/404.html` (a byte-for-byte copy of the
- * hub's `index.html`, so the SPA shell can still render its own not-found
- * UI) with a real 404 status, rather than silently falling through to the
+ * on disk either — reaches `dist/404.html` (the hub's page with a not-found
+ * head since ESCSUITE-489, so the SPA shell can still render its own
+ * not-found UI) with a real 404 status, rather than silently falling through to the
  * hub with a 200 the way the old hand-coded table did, or to serve-dist's
  * old plain-text 404 body, which this suite could never exercise before.
  */
@@ -29,10 +29,40 @@ test.describe('production: vercel.json rewrite parity (ESCSUITE-196)', () => {
     )
     expect(missResponse.status()).toBe(404)
 
-    // dist/404.html is a byte-for-byte copy of the hub's own index.html
-    // (scripts/build-all.mjs) — the "SPA fallback body".
-    const indexResponse = await request.get('http://localhost:5190/')
-    expect(await missResponse.text()).toBe(await indexResponse.text())
+    // dist/404.html is the hub's own page (the "SPA fallback body"): it loads
+    // the same script, so the hub's router renders its not-found page. Since
+    // ESCSUITE-489 its head is the not-found one; everything else (scripts,
+    // stylesheets, body) still matches the hub's page byte for byte.
+    const hubScript = (html: string) => /<script type="module"[^>]*src="(\/assets\/[^"]+\.js)"/.exec(html)?.[1]
+    const withoutNotFoundHead = (html: string) =>
+      withoutRouteHead(html)
+        .replace(/\n?[ \t]*<link\s+rel="canonical"[^>]*>/, '')
+        .replace(/\n?[ \t]*<meta\s+property="og:url"[^>]*>/, '')
+        .replace(/\n?[ \t]*<meta\s+name="robots"[^>]*>/, '')
+    const indexHtml = await (await request.get('http://localhost:5190/')).text()
+    const missHtml = await missResponse.text()
+    expect(hubScript(missHtml), 'the 404 page loads the hub').toBeTruthy()
+    expect(hubScript(missHtml)).toBe(hubScript(indexHtml))
+    expect(withoutNotFoundHead(missHtml)).toBe(withoutNotFoundHead(indexHtml))
+  })
+
+  // ESCSUITE-489: dist/404.html was a byte-for-byte copy of the home page, so a
+  // dead URL was served the home page's title, canonical and og:url. Its head
+  // is its own now, and tells search engines not to index it.
+  test('an unknown path is served the not-found head, not the home page\'s', async ({ request }) => {
+    const response = await request.get('http://localhost:5190/no-such-page-escsuite-489')
+    expect(response.status()).toBe(404)
+    const html = await response.text()
+
+    expect(html).toContain('<title>Page not found — ESCAPE Suite</title>')
+    expect(html).toMatch(/<meta\s+name="robots"\s+content="noindex"/)
+    expect(html).not.toMatch(/<link\s+rel="canonical"/)
+    expect(html).not.toMatch(/<meta\s+property="og:url"/)
+
+    const home = await (await request.get('http://localhost:5190/')).text()
+    const description = (source: string) => /<meta\s+name="description"\s+content="([^"]*)"/.exec(source)?.[1]
+    expect(description(html)).toBeTruthy()
+    expect(description(html)).not.toBe(description(home))
   })
 
   test('/privacy reaches the hub SPA with a 200', async ({ request }) => {
