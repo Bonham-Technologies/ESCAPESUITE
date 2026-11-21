@@ -32,14 +32,15 @@
     <meta name="twitter:image" content="https://escapesuite.io/og.png" />
     <meta name="twitter:image:alt" content="ESCAPE Suite — free and open-source screen recorder and video editor that runs in your browser." />
 
-    <!-- Structured data -->
+    <!-- Structured data. The build writes operatingSystem from SUPPORTED_BROWSERS in
+         src/lib/routeMeta.ts on every route (ESCSUITE-465). -->
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
         "name": "ESCAPE Suite",
         "applicationCategory": "MultimediaApplication",
-        "operatingSystem": "Web (Chrome, Edge)",
+        "operatingSystem": "Web (Chrome, Edge, Firefox 155+, Safari 26.6+)",
         "description": "Free, open-source screen recorder and video editor that runs entirely in the browser. No uploads, no accounts. Single-file offline builds available for air-gapped networks.",
         "url": "https://escapesuite.io/",
         "license": "https://www.apache.org/licenses/LICENSE-2.0",

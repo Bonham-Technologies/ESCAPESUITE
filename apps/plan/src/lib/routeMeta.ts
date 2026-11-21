@@ -8,6 +8,10 @@
  * search engine reading the served HTML sees the same head the page sets. Pure
  * strings with no DOM or React, because `vite.config.ts` imports it in Node.
  *
+ * The JSON-LD block in `index.html` is the same on every route, except that
+ * `applyRouteHead` writes its `operatingSystem` from `SUPPORTED_BROWSERS`
+ * below (ESCSUITE-465), so every served page names the same browsers.
+ *
  * Titles are 60 characters or fewer and descriptions 50 to 160, the lengths
  * search results show in full; `routeMeta.test.ts` and the production e2e
  * suite (`tests/production/route-heads.spec.ts`) check them.
@@ -20,6 +24,17 @@
  * pages.
  */
 export const SITE_URL = 'https://escapesuite.io'
+
+/**
+ * The browsers that both record and export video, as the README's "Browser
+ * support" section lists them; the hub's JSON-LD names them as its
+ * `operatingSystem`. `routeMeta.test.tsx` reads the README sentence and fails
+ * when this list and it disagree, so change both together.
+ */
+export const SUPPORTED_BROWSERS = ['Chrome', 'Edge', 'Firefox 155+', 'Safari 26.6+'] as const
+
+/** The JSON-LD `operatingSystem` on every hub page (ESCSUITE-465). */
+export const STRUCTURED_DATA_OPERATING_SYSTEM = `Web (${SUPPORTED_BROWSERS.join(', ')})`
 
 export interface RouteMeta {
   title: string
@@ -66,6 +81,11 @@ export function hubPathFor(url: string | undefined): HubPath {
 /** Where the build writes a route's HTML, relative to `dist/`. */
 export function routeHtmlFile(path: HubPath): string {
   return path === '/' ? 'index.html' : `${path.slice(1)}/index.html`
+}
+
+/** A string's content as a JSON string literal, safe inside a `<script>` element. */
+function escapeJsonString(text: string): string {
+  return JSON.stringify(text).slice(1, -1).replace(/</g, '\\u003c')
 }
 
 /**
@@ -121,8 +141,9 @@ function setTitleAndDescription(html: string, { title, description }: RouteMeta,
 
 /**
  * Returns `html` with its head set to `path`'s title, description, canonical,
- * and the Open Graph and Twitter tags that repeat them. The title, description
- * and canonical must already be there (the build fails, naming the tag, if one
+ * the Open Graph and Twitter tags that repeat them, and the JSON-LD
+ * `operatingSystem`. The title, description, canonical and `operatingSystem`
+ * must already be there (the build fails, naming the tag, if one
  * is missing, rather than serving a page without it); a social tag that is not
  * there is left out.
  */
@@ -132,6 +153,12 @@ export function applyRouteHead(html: string, path: HubPath): string {
   let out = setTitleAndDescription(html, ROUTE_META[path], 'applyRouteHead')
   out = out.replace(CANONICAL, (_match, open: string, close: string) => `${open}${url}${close}`)
   out = out.replace(metaTag('property', 'og:url'), (_match, open: string, close: string) => `${open}${url}${close}`)
+  const jsonLdOperatingSystem = /(<script type="application\/ld\+json">[^<]*?"operatingSystem"\s*:\s*")(?:[^"\\]|\\.)*(")/
+  if (!jsonLdOperatingSystem.test(out)) throw new Error('applyRouteHead: index.html has no JSON-LD operatingSystem')
+  out = out.replace(
+    jsonLdOperatingSystem,
+    (_match, open: string, close: string) => `${open}${escapeJsonString(STRUCTURED_DATA_OPERATING_SYSTEM)}${close}`
+  )
   return out
 }
 
