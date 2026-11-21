@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- ESCAPEARTIST: shortcut hints show ⌘ on a Mac or an iPad instead of "Ctrl", in the keyboard shortcuts sheet, the File menu, the toolbar and header tooltips and the undo notes (Go to Previous Marker shows ⌃M, as ⌘M minimises the window), and screen readers hear the key spelled out as "Command" or "Control"; other systems still show Ctrl (ESCSUITE-491).
 - ESCAPECRAFT: recordings made in Firefox now play back in their true colours: Firefox's encoder converts their pixels with the BT.601 matrix but says BT.709, which ESCAPECRAFT wrote into the file, so every player showed them shifted by up to about 23/255; the recorder now corrects that label to BT.601 (SMPTE 170M) the way ESCAPEARTIST's WebM export does, measured on a Firefox take first (ESCSUITE-503).
 - Hosted site: an address that does not exist is served a "Page not found — ESCAPE Suite" title and its own description, asks search engines not to index it, and no longer names the home page as its canonical address or og:url, so link previews and readers without JavaScript no longer see the home page for a dead link; the running page sets the same head (ESCSUITE-489).
 - Tests: ESCAPEARTIST's 103 pure-logic unit test files run in Node instead of a jsdom window, so the unit suite spends a third less time creating test environments and finishes about 18% sooner, with the same tests and the same coverage (ESCSUITE-488).

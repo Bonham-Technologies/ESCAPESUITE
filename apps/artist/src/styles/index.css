@@ -244,6 +244,20 @@ body {
   gap: var(--spacing-md);
 }
 
+/* Read by a screen reader, never drawn: e.g. a shortcut spelled out
+   ("Command+Z") beside the keys drawn for the eye (ESCSUITE-491). */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* Button base styles */
 .btn {
   display: inline-flex;

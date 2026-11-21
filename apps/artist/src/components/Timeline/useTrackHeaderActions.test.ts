@@ -165,6 +165,20 @@ describe('useTrackHeaderActions deleting', () => {
     expect(removeTrack).toHaveBeenCalledWith(middle)
   })
 
+  it('names ⌘Z in the question on a Mac (ESCSUITE-491)', async () => {
+    vi.stubGlobal('navigator', { ...navigator, platform: 'MacIntel', userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' })
+    try {
+      addClip('clip1', 0, 2, middle)
+      const { result } = mountActions()
+
+      await act(() => result.current.handleDeleteTrack(middle))
+
+      expect(confirmSpy).toHaveBeenCalledWith('Delete track with 1 clip(s)? ⌘Z will bring it back.', 'Delete track')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('keeps the track when the question is answered no', async () => {
     addClip('clip1', 0, 2, middle)
     confirmSpy.mockResolvedValue(false)

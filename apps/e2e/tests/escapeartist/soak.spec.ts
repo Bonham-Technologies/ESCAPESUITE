@@ -205,7 +205,7 @@ async function cycle(page: Page, random: () => number, n: number): Promise<void>
 
   // Both clips off the timeline, so the source's URL and elements are
   // released, and back on, so they are made again.
-  const undo = page.getByRole('button', { name: 'Undo (Ctrl+Z)' })
+  const undo = page.getByRole('button', { name: 'Undo (Control+Z)' })
   const redo = page.getByTitle('Redo (Ctrl+Y)')
   await undo.click()
   await undo.click()
