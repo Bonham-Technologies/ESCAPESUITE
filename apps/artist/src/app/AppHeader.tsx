@@ -1,5 +1,6 @@
 import { isStandaloneMode } from '@escapesuite/shared/config';
 import { FileMenu } from './FileMenu';
+import { chordLabel, currentShortcutPlatform } from '../utils/shortcutKeys';
 import styles from '../App.module.css';
 
 interface AppHeaderProps {
@@ -54,6 +55,10 @@ export function AppHeader({
   isSaving,
   canExport,
 }: AppHeaderProps) {
+  // The tooltips show the chord as the platform writes it (ESCSUITE-491); the
+  // buttons' names ("Save project", "Export video") carry no chord.
+  const platform = currentShortcutPlatform();
+
   return (
     <header className={styles.header}>
       <div className={styles.headerLeft}>
@@ -92,7 +97,7 @@ export function AppHeader({
         />
 
         {/* Quick action buttons */}
-        <button className={styles.headerButton} onClick={onSaveProject} disabled={isSaving} title="Save (Ctrl+S)" aria-label="Save project">
+        <button className={styles.headerButton} onClick={onSaveProject} disabled={isSaving} title={`Save (${chordLabel('S', platform)})`} aria-label="Save project">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
             <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
             <polyline points="17 21 17 13 7 13 7 21" />
@@ -104,7 +109,7 @@ export function AppHeader({
           className={`${styles.headerButton} ${styles.exportButton}`}
           onClick={onExport}
           disabled={!canExport}
-          title="Export (Ctrl+E)"
+          title={`Export (${chordLabel('E', platform)})`}
           aria-label="Export video"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">

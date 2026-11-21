@@ -172,7 +172,7 @@ test.describe('Cross-Session State Persistence', () => {
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
 
-    const undoButton = page.getByRole('button', { name: 'Undo (Ctrl+Z)' })
+    const undoButton = page.getByRole('button', { name: 'Undo (Control+Z)' })
     await expect(undoButton).toBeDisabled()
 
     await seedTextClip(page)

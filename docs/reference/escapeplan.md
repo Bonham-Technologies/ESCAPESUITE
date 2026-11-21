@@ -11,7 +11,9 @@
   entry when its source changes; the analytics wording is the owner's to approve.
 - Not-found page (ESCSUITE-455): any path that isn't a hub route renders `pages/NotFound` inside
   the Layout ("Page not found", with links home, to CRAFT and to ARTIST) instead of redirecting to
-  `/`. The hosted site serves those paths `dist/404.html` with status 404. The route list is
+  `/`. The hosted site serves those paths `dist/404.html` with status 404, which the build writes
+  with the not-found head from `NOT_FOUND_META` in `src/lib/routeMeta.ts` (noindex, no canonical or
+  `og:url`; ESCSUITE-489); the page sets the same head with `useNotFoundSeo()`. The route list is
   `src/routes.ts`; `vercel.json`'s hub rewrites must match it (`src/routes.test.ts`).
 - Per-route head (ESCSUITE-458): each route's title, description and canonical path are in
   `src/lib/routeMeta.ts`. Pages call `useRouteSeo(path)` (`src/lib/seo.ts`), and the build writes

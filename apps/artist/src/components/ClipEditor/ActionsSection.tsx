@@ -1,5 +1,6 @@
 import { CollapsibleSection } from './CollapsibleSection';
 import { SplitButton } from './SplitButton';
+import { chordLabel, currentShortcutPlatform } from '../../utils/shortcutKeys';
 import styles from './ClipEditor.module.css';
 
 interface ActionsSectionProps {
@@ -73,7 +74,7 @@ export function ActionsSection({ isVideo, isAudio, clipPosition, clipDuration, o
           className={styles.actionButton}
           onClick={onDuplicate}
           disabled={disabled}
-          title="Duplicate clip (Ctrl+D)"
+          title={`Duplicate clip (${chordLabel('D', currentShortcutPlatform())})`}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />

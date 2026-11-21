@@ -1,10 +1,13 @@
 import { render } from '@testing-library/react'
 import {
+  NOT_FOUND_HTML_FILE,
+  NOT_FOUND_META,
   ROUTE_META,
   ROUTE_PATHS,
   SITE_URL,
   STRUCTURED_DATA_OPERATING_SYSTEM,
   SUPPORTED_BROWSERS,
+  applyNotFoundHead,
   applyRouteHead,
   hubPathFor,
   routeHtmlFile,
@@ -33,6 +36,7 @@ function headOf(html: string) {
     ogUrl: content('meta[property="og:url"]'),
     twitterTitle: content('meta[name="twitter:title"]'),
     twitterDescription: content('meta[name="twitter:description"]'),
+    robots: content('meta[name="robots"]'),
   }
 }
 
@@ -68,6 +72,7 @@ describe('applyRouteHead', () => {
       ogUrl: url,
       twitterTitle: title,
       twitterDescription: description,
+      robots: undefined,
     })
   })
 
@@ -160,6 +165,60 @@ describe('structured data (ESCSUITE-465)', () => {
     const jsonLd = '<script type="application/ld+json">{ "operatingSystem": "old" }</script>'
     const [data] = jsonLdOf(applyRouteHead(html + jsonLd, '/'))
     expect(data.operatingSystem).toBe(STRUCTURED_DATA_OPERATING_SYSTEM)
+  })
+})
+
+/**
+ * ESCSUITE-489: the hosted site's `404.html` was a byte-for-byte copy of the
+ * home page, so a dead URL was served the home page's title, description,
+ * canonical and og:url, and nothing told search engines not to index it.
+ */
+describe('applyNotFoundHead (ESCSUITE-489)', () => {
+  it('is written to 404.html, the file the hosting serves with status 404', () => {
+    expect(NOT_FOUND_HTML_FILE).toBe('404.html')
+  })
+
+  it('has a not-found title and a description of its own, in the lengths search results show', () => {
+    expect(NOT_FOUND_META.title).toBe('Page not found — ESCAPE Suite')
+    expect(NOT_FOUND_META.title.length).toBeLessThanOrEqual(60)
+    expect(NOT_FOUND_META.description.length).toBeGreaterThanOrEqual(50)
+    expect(NOT_FOUND_META.description.length).toBeLessThanOrEqual(160)
+    expect(Object.values(ROUTE_META).map((m) => m.description)).not.toContain(NOT_FOUND_META.description)
+  })
+
+  it('writes the not-found head: noindex, and no canonical or og:url', () => {
+    const { title, description } = NOT_FOUND_META
+    expect(headOf(applyNotFoundHead(indexHtml))).toEqual({
+      title,
+      description,
+      canonicals: [],
+      ogTitle: title,
+      ogDescription: description,
+      ogUrl: undefined,
+      twitterTitle: title,
+      twitterDescription: description,
+      robots: 'noindex',
+    })
+  })
+
+  it('changes nothing outside the head tags it sets', () => {
+    const out = applyNotFoundHead(indexHtml)
+    const body = (html: string) => html.slice(html.indexOf('<body>'))
+    expect(body(out)).toBe(body(indexHtml))
+    expect(out).toContain('<meta property="og:image" content="https://escapesuite.io/og.png" />')
+    expect(out).not.toMatch(/\n\s*\n\s*<meta name="theme-color"/)
+  })
+
+  it('writes one robots tag when the page already has one', () => {
+    const once = applyNotFoundHead(indexHtml)
+    expect(applyNotFoundHead(once)).toBe(once)
+  })
+
+  it.each([
+    ['<title>', /<title>[\s\S]*?<\/title>/],
+    ['meta description', /<meta name="description"[^>]*>/],
+  ])('fails, naming it, when index.html has no %s', (name, pattern) => {
+    expect(() => applyNotFoundHead(indexHtml.replace(pattern, ''))).toThrow(`applyNotFoundHead: index.html has no ${name}`)
   })
 })
 

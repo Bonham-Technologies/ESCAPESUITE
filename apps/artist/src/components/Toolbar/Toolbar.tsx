@@ -2,6 +2,7 @@ import { useCallback } from 'react';
 import { useEditorStore } from '../../store/projectStore';
 import { anyClipOnLockedTrack } from '../../store/trackLock';
 import { formatTimecode } from '../../utils/timeUtils';
+import { chordLabel, chordSpoken, currentShortcutPlatform } from '../../utils/shortcutKeys';
 import type { ToolType } from '../../store/types';
 import styles from './Toolbar.module.css';
 
@@ -17,6 +18,7 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
   const loopPlayback = useEditorStore((state) => state.loopPlayback);
   const setLoopPlayback = useEditorStore((state) => state.setLoopPlayback);
   const addMarker = useEditorStore((state) => state.addMarker);
+  const platform = currentShortcutPlatform();
   const inPoint = useEditorStore((state) => state.inPoint);
   const outPoint = useEditorStore((state) => state.outPoint);
   const setInPoint = useEditorStore((state) => state.setInPoint);
@@ -109,7 +111,9 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
 
       <div className={styles.divider} />
 
-      {/* Undo/Redo group */}
+      {/* Undo/Redo group. The tooltip shows the chord as the platform writes
+          it (⌘Z, Ctrl+Z); the name a screen reader reads spells it out
+          (ESCSUITE-491). */}
       <div className={styles.toolGroup}>
         <span className={styles.groupLabel}>History</span>
         <div className={styles.buttonGroup}>
@@ -117,7 +121,8 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
             className={styles.toolButton}
             onClick={undo}
             disabled={!canUndo()}
-            title="Undo (Ctrl+Z)"
+            title={`Undo (${chordLabel('Z', platform)})`}
+            aria-label={`Undo (${chordSpoken('Z', platform)})`}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 7v6h6" />
@@ -128,7 +133,8 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
             className={styles.toolButton}
             onClick={redo}
             disabled={!canRedo()}
-            title="Redo (Ctrl+Y)"
+            title={`Redo (${chordLabel('Y', platform)})`}
+            aria-label={`Redo (${chordSpoken('Y', platform)})`}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 7v6h-6" />

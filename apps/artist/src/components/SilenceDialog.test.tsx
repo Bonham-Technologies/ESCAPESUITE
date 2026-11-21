@@ -206,6 +206,23 @@ describe('Remove silences', () => {
     expect(onRemoved).toHaveBeenCalledWith('Removed 2 pauses (1.60 s). Ctrl+Z puts them back.')
   })
 
+  it('says ⌘Z on a Mac, where the chord is Cmd (ESCSUITE-491)', async () => {
+    vi.stubGlobal('navigator', { ...navigator, platform: 'MacIntel', userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' })
+    try {
+      const { screen: part } = placeTake()
+      store().setSelectedClipId(part.id)
+      const user = userEvent.setup()
+      const { rerender, onRemoved } = renderEditor()
+      await user.click(screen.getByRole('button', { name: 'Find silences' }))
+      rerender(<><ClipEditor /><Dialog onRemoved={onRemoved} /></>)
+
+      await user.click(screen.getByRole('button', { name: 'Remove all' }))
+      expect(onRemoved).toHaveBeenCalledWith('Removed 2 pauses (1.60 s). ⌘Z puts them back.')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('keeps keyboard focus in the list after Keep: next row, else previous, else Cancel (ESCSUITE-441)', async () => {
     const { screen: part } = placeTake()
     store().setSelectedClipId(part.id)

@@ -12,6 +12,7 @@ import {
   type TimeRange,
 } from '../core/silenceDetection';
 import { cutHeldByLock, leftBehind, type LeftBehind } from '../store/rippleRanges';
+import { chordLabel, currentShortcutPlatform } from '../utils/shortcutKeys';
 import styles from './SilenceDialog.module.css';
 
 interface SilenceDialogProps {
@@ -312,7 +313,7 @@ function SilenceReview({ onRemoved }: SilenceDialogProps) {
       setRefused(there ? 'locked' : 'gone');
       return;
     }
-    const removed = `Removed ${count(candidates.length, 'pause', 'pauses')} (${seconds(totalLength(candidates))}). Ctrl+Z puts ${candidates.length === 1 ? 'it' : 'them'} back.`;
+    const removed = `Removed ${count(candidates.length, 'pause', 'pauses')} (${seconds(totalLength(candidates))}). ${chordLabel('Z', currentShortcutPlatform())} puts ${candidates.length === 1 ? 'it' : 'them'} back.`;
     onRemoved(left ? `${removed} ${leftBehindText(left, moveEverything, 'did not move')}` : removed);
     close();
   };
