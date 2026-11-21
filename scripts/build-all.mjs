@@ -7,7 +7,7 @@
  * Output structure:
  * dist/
  * ├── index.html          (ESCAPEPLAN)
- * ├── 404.html            (not-found page: served with status 404)
+ * ├── 404.html            (ESCAPEPLAN's not-found page: served with status 404)
  * ├── privacy/index.html  (ESCAPEPLAN, one per hub route with its own head)
  * ├── assets/             (ESCAPEPLAN assets)
  * ├── craft/
@@ -35,7 +35,6 @@ import {
   mkdirSync,
   rmSync,
   existsSync,
-  copyFileSync,
   statSync,
   realpathSync,
   readFileSync,
@@ -163,6 +162,32 @@ export function verifyDistLayout(distDir, rewrites = []) {
 }
 
 /**
+ * Why `notFoundHtml` (`dist/404.html`) is not a not-found page, or `[]` when it
+ * is. Vercel serves it, with status 404, for every path that is neither a file
+ * nor a rewrite, so its head must not be the home page's (`homeHtml`): before
+ * ESCSUITE-489 it was a byte-for-byte copy of `index.html`, and every dead URL
+ * unfurled as the home page, canonical and og:url included. The hub's build
+ * writes it with its own head (`apps/plan/src/lib/routeMeta.ts`); this stops a
+ * build that lost that from publishing.
+ */
+export function notFoundHeadProblems(notFoundHtml, homeHtml) {
+  const first = (html, pattern) => pattern.exec(html)?.[1];
+  const title = /<title>([\s\S]*?)<\/title>/;
+  const description = /<meta\s+name="description"\s+content="([^"]*)"/;
+  const problems = [];
+  if (first(notFoundHtml, title) === first(homeHtml, title)) problems.push("has the home page's <title>");
+  if (first(notFoundHtml, description) === first(homeHtml, description)) {
+    problems.push("has the home page's meta description");
+  }
+  if (first(notFoundHtml, /<meta\s+name="robots"\s+content="([^"]*)"/) !== 'noindex') {
+    problems.push('has no <meta name="robots" content="noindex">');
+  }
+  if (/<link\s+rel="canonical"/.test(notFoundHtml)) problems.push('has a rel="canonical" link');
+  if (/<meta\s+property="og:url"/.test(notFoundHtml)) problems.push('has an og:url');
+  return problems;
+}
+
+/**
  * True when this file was executed, false when a test imported it.
  *
  * `import.meta.url` is already realpath'd, so argv[1] has to be too — otherwise
@@ -223,17 +248,11 @@ function main() {
   const planDist = join(appsDir, 'plan', 'dist');
   if (checkAppDist(planDist)) {
     console.log('  → Copying ESCAPEPLAN to dist/');
+    // That includes 404.html: Vercel serves it, with status 404, for any path
+    // that is neither a file nor one of vercel.json's rewrites (ESCSUITE-455).
+    // The hub's build writes it, the hub's page with the not-found head
+    // (ESCSUITE-489), and its router shows the not-found page there.
     cpSync(planDist, distDir, { recursive: true });
-
-    // Create 404.html: Vercel serves it, with status 404, for any path that is
-    // neither a file nor one of vercel.json's rewrites (ESCSUITE-455). It is a
-    // copy of the hub's page, whose router shows its not-found page there.
-    const indexHtml = join(distDir, 'index.html');
-    const notFoundHtml = join(distDir, '404.html');
-    if (existsSync(indexHtml)) {
-      copyFileSync(indexHtml, notFoundHtml);
-      console.log('  → Created 404.html (not-found page)');
-    }
   } else {
     console.error('  ❌ ESCAPEPLAN dist not found or empty — nothing to publish');
     failures.push('ESCAPEPLAN');
@@ -290,10 +309,27 @@ function main() {
     }
   }
 
-  if (failures.length > 0 || missingOutputs.length > 0) {
-    console.error(
-      `\n❌ Build failed: ${failures.length > 0 ? failures.join(', ') + ' produced no dist.' : 'dist/ layout is incomplete.'}`
-    );
+  const notFoundPath = join(distDir, '404.html');
+  const homePath = join(distDir, 'index.html');
+  const notFoundProblems =
+    isNonEmptyFile(notFoundPath) && isNonEmptyFile(homePath)
+      ? notFoundHeadProblems(readFileSync(notFoundPath, 'utf8'), readFileSync(homePath, 'utf8'))
+      : [];
+  if (notFoundProblems.length > 0) {
+    console.error('\n❌ dist/404.html is not a not-found page:');
+    for (const problem of notFoundProblems) {
+      console.error(`   - ${problem}`);
+    }
+  }
+
+  if (failures.length > 0 || missingOutputs.length > 0 || notFoundProblems.length > 0) {
+    const reason =
+      failures.length > 0
+        ? failures.join(', ') + ' produced no dist.'
+        : missingOutputs.length > 0
+          ? 'dist/ layout is incomplete.'
+          : 'dist/404.html has the home page\'s head.';
+    console.error(`\n❌ Build failed: ${reason}`);
     process.exit(1);
   }
 
