@@ -20,7 +20,7 @@ import type {
   RecorderStopCallback,
   RecordingConfig,
 } from '../store/types';
-import { createVp9ColourSpaceStamper } from '@escapesuite/shared/utils';
+import { createVp9ColourSpaceStamper, isFirefoxEngine, relabelFirefoxVpxMeta } from '@escapesuite/shared/utils';
 import { COMPANION_PARTS } from '../utils/companionParts';
 import { isWebCodecsRecordingSupported } from './webcodecsSupport';
 import { CAPTURE_FRAME_RATE } from './captureFrameRate';
@@ -627,7 +627,8 @@ export class WebCodecsRecorder {
       (e) => {
         console.error('Video encoder error:', e);
         this.callbacks.onError?.(new Error(`Video encoder error: ${e.message}`));
-      }
+      },
+      this.canvas !== null
     );
     // The encoder itself is already closed — `registerCodec()` put it on the
     // list before its `configure()` was awaited (ESCSUITE-66) — but the audio
@@ -778,7 +779,9 @@ export class WebCodecsRecorder {
         (e) => {
           console.warn(`${COMPANION_PARTS.webcam.trackLabel} track encoder failed: ${e.message}`);
           this.failCompanion(companion);
-        }
+        },
+        // The webcam's frames always come off a MediaStreamTrackProcessor.
+        false
       );
       this.abortIfDisposed();
     } catch (e) {
@@ -1258,24 +1261,37 @@ export class WebCodecsRecorder {
    * encoder failure *means* differs by pipeline: the primary's is the end of
    * the take, the companion's is the end of the companion. A shared handler
    * made a webcam hiccup throw away the screen recording.
+   *
+   * `canvasFrames` says the encoder is fed frames built from the capture
+   * canvas (the `<video>` fallback), which in Firefox get their colour label
+   * corrected (below).
    */
   private async createVideoEncoder(
     sourceOf: () => EncodedVideoPacketSource | null,
     width: number,
     height: number,
-    onEncoderError: (error: DOMException) => void
+    onEncoderError: (error: DOMException) => void,
+    canvasFrames: boolean
   ): Promise<VideoEncoder> {
     // VP9 encoders leave the key frame header's colour field "unknown" and
     // report the matrix only in the decoder configuration; Firefox's <video>
     // and ffmpeg read the header. Mediabunny's muxer copied the report into it
     // up to 1.65; from 1.66.0 this does.
     const stampColourSpace = createVp9ColourSpaceStamper();
+    // Firefox's encoder converts a canvas-built frame with the BT.601 matrix
+    // but reports BT.709 (ESCSUITE-284; measured on a CRAFT take, ESCSUITE-503).
+    // Correcting that exact report before the stamper and the muxer read it
+    // corrects both the key frame headers and the Colour element, as ARTIST's
+    // WebM export does. Frames off a MediaStreamTrackProcessor were never
+    // measured, so they keep the encoder's report.
+    const relabel = canvasFrames && isFirefoxEngine(globalThis.navigator);
     const encoder = this.registerCodec(
       new VideoEncoder({
         output: async (chunk, meta) => {
           const source = sourceOf();
           if (source) {
-            await source.add(stampColourSpace(EncodedPacket.fromEncodedChunk(chunk), meta), meta);
+            const labelled = relabel ? relabelFirefoxVpxMeta(meta) : meta;
+            await source.add(stampColourSpace(EncodedPacket.fromEncodedChunk(chunk), labelled), labelled);
           }
         },
         error: onEncoderError,
