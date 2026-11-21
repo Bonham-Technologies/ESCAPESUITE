@@ -17,6 +17,12 @@
   `src/lib/routeMeta.ts`. Pages call `useRouteSeo(path)` (`src/lib/seo.ts`), and the build writes
   the same head into each route's own HTML (`dist/privacy/index.html`, ...), so the served HTML
   and the running page agree. See `docs/reference/vercel-deployment.md`.
+- Structured data (ESCSUITE-465): `index.html`'s JSON-LD block ships on every route. Its
+  `operatingSystem` comes from `SUPPORTED_BROWSERS` in `src/lib/routeMeta.ts`, which
+  `applyRouteHead` writes into each route's HTML (the build fails if the block or the field is
+  missing). `src/lib/routeMeta.test.tsx` reads the browser list from the README's "Browser
+  support" sentence ("…requires the WebCodecs API, which … all provide") and fails when the two
+  disagree, so change the README and the constant together.
 - Sitemap (ESCSUITE-457): the build writes `dist/sitemap.xml` (the `escapeplan-sitemap` plugin in
   `vite.config.ts`) from `SITEMAP_PATHS` in `src/lib/sitemap.ts`: the hub routes from
   `routeMeta.ts` plus `TOOL_PATHS` (`/craft/`, `/artist/`, which `launch.ts` links to). There is
