@@ -17,12 +17,28 @@
 import { useEffect, useRef } from 'react';
 import { appVersionLabel } from '@escapesuite/shared/config';
 import { useDialogBehaviour } from '@escapesuite/shared/hooks';
+import {
+  currentShortcutPlatform,
+  modifierKey,
+  modifierKeyName,
+  type ShortcutPlatform,
+} from '../../utils/shortcutKeys';
 import styles from './KeyboardShortcuts.module.css';
 
 interface KeyboardShortcutsProps {
   isOpen: boolean;
   onClose: () => void;
+  /** Whose modifier the chord rows name; read from the browser when absent (ESCSUITE-491). */
+  platform?: ShortcutPlatform;
 }
+
+/**
+ * The chord modifier, which the sheet shows as the platform names it: ⌘ on
+ * Apple platforms, Ctrl elsewhere, and Command / Control to a screen reader
+ * (ESCSUITE-491). Every chord answers either key; a chord macOS keeps for
+ * itself (⌘M) shows Control on a Mac (⌃M).
+ */
+const MOD = 'Mod';
 
 interface ShortcutGroup {
   title: string;
@@ -51,12 +67,12 @@ const shortcutGroups: ShortcutGroup[] = [
   {
     title: 'Editing',
     shortcuts: [
-      { keys: ['Ctrl', 'Z'], description: 'Undo' },
-      { keys: ['Ctrl', 'Y'], description: 'Redo' },
-      { keys: ['Ctrl', 'Shift', 'Z'], description: 'Redo' },
+      { keys: [MOD, 'Z'], description: 'Undo' },
+      { keys: [MOD, 'Y'], description: 'Redo' },
+      { keys: [MOD, 'Shift', 'Z'], description: 'Redo' },
       { keys: ['Delete'], description: 'Delete Selected Clip (Alt: without its linked clips)' },
-      { keys: ['Ctrl', 'D'], description: 'Duplicate Clip' },
-      { keys: ['Ctrl', 'B'], description: 'Split Clip at Playhead (Alt: without its linked clips)' },
+      { keys: [MOD, 'D'], description: 'Duplicate Clip' },
+      { keys: [MOD, 'B'], description: 'Split Clip at Playhead (Alt: without its linked clips)' },
       { keys: ['Escape'], description: 'Deselect' },
     ],
   },
@@ -68,7 +84,7 @@ const shortcutGroups: ShortcutGroup[] = [
       { keys: ['S'], description: 'Toggle Snapping' },
       { keys: ['M'], description: 'Add Marker' },
       { keys: ['Shift', 'M'], description: 'Go to Next Marker' },
-      { keys: ['Ctrl', 'M'], description: 'Go to Previous Marker' },
+      { keys: [MOD, 'M'], description: 'Go to Previous Marker' },
     ],
   },
   {
@@ -102,14 +118,14 @@ const shortcutGroups: ShortcutGroup[] = [
   {
     title: 'File',
     shortcuts: [
-      { keys: ['Ctrl', 'S'], description: 'Save Project' },
-      { keys: ['Ctrl', 'O'], description: 'Open Project' },
-      { keys: ['Ctrl', 'E'], description: 'Export Video' },
+      { keys: [MOD, 'S'], description: 'Save Project' },
+      { keys: [MOD, 'O'], description: 'Open Project' },
+      { keys: [MOD, 'E'], description: 'Export Video' },
     ],
   },
 ];
 
-export function KeyboardShortcuts({ isOpen, onClose }: KeyboardShortcutsProps) {
+export function KeyboardShortcuts({ isOpen, onClose, platform }: KeyboardShortcutsProps) {
   // `onClose` is read through a ref because `App` passes a fresh arrow every
   // render; depending on it directly would re-bind the listener on every
   // keystroke the app re-renders for. Same reason as `useDialogBehaviour`'s —
@@ -151,6 +167,12 @@ export function KeyboardShortcuts({ isOpen, onClose }: KeyboardShortcutsProps) {
 
   if (!isOpen) return null;
 
+  const onPlatform = platform ?? currentShortcutPlatform();
+  // `letter` is the row's last key: a chord macOS keeps for itself (⌘M
+  // minimises the window) names Control on a Mac instead (ESCSUITE-491).
+  const shown = (key: string, letter: string) => (key === MOD ? modifierKey(onPlatform, letter) : key);
+  const spoken = (key: string, letter: string) => (key === MOD ? modifierKeyName(onPlatform, letter) : key);
+
   return (
     <div className={styles.overlay} onClick={onClose}>
       <div
@@ -183,16 +205,19 @@ export function KeyboardShortcuts({ isOpen, onClose }: KeyboardShortcutsProps) {
               <div className={styles.shortcuts}>
                 {group.shortcuts.map((shortcut, index) => (
                   <div key={index} className={styles.shortcutRow}>
-                    <div className={styles.keys}>
+                    {/* The keys as drawn are hidden from a screen reader, which
+                        is read the chord spelled out instead ("Command+Z"). */}
+                    <div className={styles.keys} aria-hidden="true">
                       {shortcut.keys.map((key, keyIndex) => (
                         <span key={keyIndex}>
-                          <kbd className={styles.key}>{key}</kbd>
+                          <kbd className={styles.key}>{shown(key, shortcut.keys[shortcut.keys.length - 1])}</kbd>
                           {keyIndex < shortcut.keys.length - 1 && (
                             <span className={styles.plus}>+</span>
                           )}
                         </span>
                       ))}
                     </div>
+                    <span className="visually-hidden">{shortcut.keys.map((key) => spoken(key, shortcut.keys[shortcut.keys.length - 1])).join('+')}</span>
                     <span className={styles.description}>{shortcut.description}</span>
                   </div>
                 ))}

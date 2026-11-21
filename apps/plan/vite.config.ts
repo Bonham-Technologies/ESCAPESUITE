@@ -1,7 +1,14 @@
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { visualizer } from 'rollup-plugin-visualizer'
-import { ROUTE_PATHS, applyRouteHead, hubPathFor, routeHtmlFile } from './src/lib/routeMeta.ts'
+import {
+  NOT_FOUND_HTML_FILE,
+  ROUTE_PATHS,
+  applyNotFoundHead,
+  applyRouteHead,
+  hubPathFor,
+  routeHtmlFile,
+} from './src/lib/routeMeta.ts'
 import { buildSitemapXml, sitemapEntries } from './src/lib/sitemap.ts'
 
 /**
@@ -9,8 +16,10 @@ import { buildSitemapXml, sitemapEntries } from './src/lib/sitemap.ts'
  * The dev server gets the requested route's head in the `index.html` it serves;
  * the build sets `/`'s head in `index.html` and writes one more copy per route
  * (`privacy/index.html`, ...) with that route's title, description, canonical
- * and social tags. `vercel.json` rewrites each route to its file. The heads come
- * from `src/lib/routeMeta.ts`, which `seo.ts` reads too.
+ * and social tags. `vercel.json` rewrites each route to its file. It also writes
+ * `404.html`, the page the hosting serves with status 404, with the not-found
+ * head: noindex and no canonical or og:url (ESCSUITE-489). The heads come from
+ * `src/lib/routeMeta.ts`, which `seo.ts` reads too.
  */
 function routeHeads(): Plugin {
   return {
@@ -31,6 +40,7 @@ function routeHeads(): Plugin {
           if (path === '/') continue
           this.emitFile({ type: 'asset', fileName: routeHtmlFile(path), source: applyRouteHead(html, path) })
         }
+        this.emitFile({ type: 'asset', fileName: NOT_FOUND_HTML_FILE, source: applyNotFoundHead(html) })
       },
     },
   }

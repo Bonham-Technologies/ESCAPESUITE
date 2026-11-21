@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Toolbar } from './Toolbar'
@@ -65,6 +65,30 @@ describe('Toolbar', () => {
       await user.click(button(/Selection Tool/))
 
       expect(store().activeTool).toBe('select')
+    })
+  })
+
+  // ESCSUITE-491: the chords answer Ctrl or Cmd, so the tooltip names the
+  // platform's own modifier and the button's name spells it out.
+  describe('history hints', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    it('shows ⌘ on a Mac, and names the buttons with Command', () => {
+      vi.stubGlobal('navigator', { ...navigator, platform: 'MacIntel', userAgent: 'Mozilla/5.0 (Macintosh)' })
+      renderToolbar()
+
+      expect(screen.getByRole('button', { name: 'Undo (Command+Z)' })).toHaveAttribute('title', 'Undo (⌘Z)')
+      expect(screen.getByRole('button', { name: 'Redo (Command+Y)' })).toHaveAttribute('title', 'Redo (⌘Y)')
+    })
+
+    it('shows Ctrl anywhere else, and names the buttons with Control', () => {
+      vi.stubGlobal('navigator', { ...navigator, platform: 'Win32', userAgent: 'Mozilla/5.0 (Windows NT 10.0)' })
+      renderToolbar()
+
+      expect(screen.getByRole('button', { name: 'Undo (Control+Z)' })).toHaveAttribute('title', 'Undo (Ctrl+Z)')
+      expect(screen.getByRole('button', { name: 'Redo (Control+Y)' })).toHaveAttribute('title', 'Redo (Ctrl+Y)')
     })
   })
 

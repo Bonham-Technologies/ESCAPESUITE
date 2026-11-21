@@ -98,3 +98,39 @@ rewrites the Segment as unknown-size, 8 bytes wide. It rewrites a cut known-size
 as "unknown" at the same width, and drops anything after the Clusters. The result is the shape
 `fixWebMMetadata` already repairs, so recovery runs that same repair. See
 [`crash-safe-takes.md`](crash-safe-takes.md).
+
+## Firefox's colour label (ESCSUITE-503)
+
+Firefox has no `MediaStreamTrackProcessor`, so the WebCodecs recorder builds every Firefox frame by
+drawing a playing `<video>` onto the capture canvas. Firefox's VP9 encoder converts such a
+canvas-built frame with the **BT.601** matrix but reports `decoderConfig.colorSpace` as
+`{ primaries: 'bt709', transfer: 'bt709', matrix: 'bt709', fullRange: false }`, the defect ARTIST's
+WebM export measured and fixed in ESCSUITE-284 (ARTIST's `webm-export-reliability.md` has the
+per-player table). Until ESCSUITE-503 CRAFT wrote that report into the Colour element and, through
+the stamper, into every key frame header, so every player showed a Firefox take shifted.
+
+**Measured** on 2026-11-21 in Playwright's Firefox 159 on Linux, with a private PulseAudio null sink
+as the Nightly uses: a CRAFT take of eight flat patches (among them (228,61,99), (40,200,60),
+(200,50,200) and mid grey) plus a moving white square, each patch's centre averaged in the raw
+yuv420p of a key frame 1 s in (decoded by ffmpeg, no colour conversion) and compared with the drawn
+RGB converted both ways, limited range:
+
+| Hypothesis | Max YUV error (code values) | RGB read back: mean / max error (out of 255) |
+|---|---|---|
+| BT.601 | 1.2 | 0.76 / 2.6 |
+| BT.709 (the label it carried) | 16.9 | 8.78 / 23.3 |
+
+(228,61,99) read back as (241,80,96) under the BT.709 label, the same figure ESCSUITE-284 measured
+for an ARTIST export on Firefox 155 (macOS). A canvas `VideoFrame` fed straight to the encoder gave
+identical numbers, so the `<video>`-to-canvas step adds nothing.
+
+**The fix** is ARTIST's: `createVideoEncoder` hands the stamper and the muxer
+`relabelFirefoxVpxMeta(meta)` (`@escapesuite/shared/utils`) in place of the encoder's metadata, so
+the take says SMPTE 170M in both places (Colour matrix 6, header `color_space` 3) and its pixels
+are unchanged. It applies only when `isFirefoxEngine` (the same shared `Gecko/` and `Firefox/`
+test ARTIST uses) and the encoder is fed canvas frames, and the helper changes only that exact
+report; frames off a `MediaStreamTrackProcessor` (the webcam companion, or a future Firefox that
+ships one) were never measured and keep the encoder's report. Pinned by
+`webcodecs-recorder.test.ts` ("Firefox's colour label") and, in the Nightly's Firefox project, by
+`apps/e2e/tests/export/vp9-colour-space.spec.ts`. When Firefox fixes Bugzilla 2057760, the gate's
+retirement follows ARTIST's (see `relabelFirefoxVpxMeta`'s comment and ESCSUITE-288).

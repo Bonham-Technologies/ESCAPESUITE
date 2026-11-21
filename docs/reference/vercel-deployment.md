@@ -32,8 +32,12 @@ hub's page, each to its own copy (`/index.html`, `/privacy/index.html`, ...), an
 `/craft/` and `/artist/` to that app's `index.html`. A path
 that is neither a file nor one of those routes gets `dist/404.html` with status 404 (ESCSUITE-455;
 before it, a catch-all sent every unknown path to the hub with status 200, a "soft 404"). `404.html`
-is a copy of the hub's page, and the hub's router shows its not-found page, with links home and to
-both tools, for any path it doesn't know.
+is the hub's page, written by the hub's build with the not-found head (ESCSUITE-489: title "Page
+not found — ESCAPE Suite", its own description, `<meta name="robots" content="noindex">`, and no
+canonical or `og:url`), and the hub's router shows its not-found page, with links home and to both
+tools, for any path it doesn't know. Before ESCSUITE-489 it was a byte-for-byte copy of
+`index.html`, so dead URLs unfurled as the home page; `scripts/build-all.mjs` now refuses to publish
+a `404.html` with the home page's title, description, canonical or `og:url`, or without the noindex.
 
 **Per-route head (ESCSUITE-458).** Each hub route's HTML carries that route's own title,
 description, `rel="canonical"` and `og:`/`twitter:` title, description and url before any

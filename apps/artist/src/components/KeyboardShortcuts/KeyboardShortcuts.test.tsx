@@ -6,6 +6,7 @@ import { pretendElementsAreVisible } from '../../test/doubles/layout'
 import styles from './KeyboardShortcuts.module.css'
 import { BOUND_SINGLE_KEYS, BOUND_CHORDS } from '../../app/useAppKeyboardShortcuts'
 import { TRANSPORT_KEYS } from '../Preview/transportKeys'
+import { modifierKey } from '../../utils/shortcutKeys'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -270,14 +271,14 @@ describe('KeyboardShortcuts matches the keys the app binds', () => {
     expect(unbound).toEqual([])
   })
 
-  it('every Ctrl chord row is bound by the cascade (ESCSUITE-269)', () => {
-    render(<KeyboardShortcuts isOpen={true} onClose={vi.fn()} />)
+  it.each(['other', 'apple'] as const)('every Ctrl/Cmd chord row is bound by the cascade (ESCSUITE-269, %s)', (platform) => {
+    render(<KeyboardShortcuts isOpen={true} onClose={vi.fn()} platform={platform} />)
     const bound = new Set(BOUND_CHORDS.map((c) => `${c.key}${c.shift ? '+shift' : ''}`))
     const chordRows: string[] = []
     const unbound: string[] = []
     for (const row of Array.from(document.querySelectorAll(`.${styles.shortcutRow}`))) {
       const keys = Array.from(row.querySelectorAll('kbd')).map((k) => k.textContent ?? '')
-      if (keys[0] !== 'Ctrl') continue
+      if (keys[0] !== modifierKey(platform, keys[keys.length - 1])) continue
       const id = `${keys[keys.length - 1].toLowerCase()}${keys.includes('Shift') ? '+shift' : ''}`
       chordRows.push(id)
       if (!bound.has(id)) unbound.push(keys.join('+'))
@@ -295,5 +296,69 @@ describe('KeyboardShortcuts version line', () => {
 
     expect(screen.getByRole('dialog')).toHaveTextContent(`ESCAPEARTIST v${version}`)
     expect(screen.getByText(`ESCAPEARTIST v${version}`)).toHaveClass(styles.version)
+  })
+})
+
+// ESCSUITE-491: every chord answers Ctrl or Cmd, so the sheet names the
+// platform's own modifier, and spells it out for a screen reader.
+describe('KeyboardShortcuts names the platform\'s modifier', () => {
+  const keysOf = (description: string) =>
+    Array.from(
+      screen.getAllByText(description, { selector: `.${styles.description}` })[0]
+        .closest(`.${styles.shortcutRow}`)!
+        .querySelectorAll('kbd'),
+    ).map((k) => k.textContent)
+  const allKeys = () => Array.from(document.querySelectorAll('kbd')).map((k) => k.textContent)
+
+  it('shows ⌘ on an Apple platform, and says Command', () => {
+    render(<KeyboardShortcuts isOpen onClose={vi.fn()} platform="apple" />)
+
+    expect(keysOf('Undo')).toEqual(['⌘', 'Z'])
+    expect(keysOf('Save Project')).toEqual(['⌘', 'S'])
+    // ⌘M minimises the window before the page sees it; Control+M reaches it.
+    expect(keysOf('Go to Previous Marker')).toEqual(['⌃', 'M'])
+    expect(screen.getByText('Control+M')).toBeInTheDocument()
+    expect(screen.queryByText('Command+M')).not.toBeInTheDocument()
+    expect(allKeys()).not.toContain('Ctrl')
+    const undoRow = screen.getByText('Undo').closest(`.${styles.shortcutRow}`)!
+    expect(undoRow.querySelector(`.${styles.keys}`)).toHaveAttribute('aria-hidden', 'true')
+    expect(undoRow).toHaveTextContent('Command+Z')
+    expect(screen.getAllByText('Command+Shift+Z')).toHaveLength(1)
+  })
+
+  it('shows Ctrl anywhere else, and says Control', () => {
+    render(<KeyboardShortcuts isOpen onClose={vi.fn()} platform="other" />)
+
+    expect(keysOf('Undo')).toEqual(['Ctrl', 'Z'])
+    expect(keysOf('Export Video')).toEqual(['Ctrl', 'E'])
+    expect(keysOf('Go to Previous Marker')).toEqual(['Ctrl', 'M'])
+    expect(allKeys()).not.toContain('⌘')
+    expect(screen.getByText('Undo').closest(`.${styles.shortcutRow}`)).toHaveTextContent('Control+Z')
+  })
+
+  it('leaves keys that are not the modifier as they are, spoken as shown', () => {
+    render(<KeyboardShortcuts isOpen onClose={vi.fn()} platform="apple" />)
+
+    expect(keysOf('Go to Next Marker')).toEqual(['Shift', 'M'])
+    expect(screen.getByText('Shift+M')).toBeInTheDocument()
+    expect(keysOf('Selection Tool')).toEqual(['V'])
+  })
+
+  describe('read from the browser when not given', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    it('reads a Mac as Apple', () => {
+      vi.stubGlobal('navigator', { ...navigator, platform: 'MacIntel', userAgent: 'Mozilla/5.0 (Macintosh)' })
+      render(<KeyboardShortcuts isOpen onClose={vi.fn()} />)
+      expect(keysOf('Undo')).toEqual(['⌘', 'Z'])
+    })
+
+    it('reads Windows as Ctrl', () => {
+      vi.stubGlobal('navigator', { ...navigator, platform: 'Win32', userAgent: 'Mozilla/5.0 (Windows NT 10.0)' })
+      render(<KeyboardShortcuts isOpen onClose={vi.fn()} />)
+      expect(keysOf('Undo')).toEqual(['Ctrl', 'Z'])
+    })
   })
 })

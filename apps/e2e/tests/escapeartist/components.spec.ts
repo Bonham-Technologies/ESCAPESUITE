@@ -445,7 +445,7 @@ test.describe('Toolbar', () => {
   })
 
   test('undo button exists', async ({ page }) => {
-    const undoButton = page.getByRole('button', { name: 'Undo (Ctrl+Z)' })
+    const undoButton = page.getByRole('button', { name: 'Undo (Control+Z)' })
     await expect(undoButton).toBeVisible()
     // Nothing to undo yet.
     await expect(undoButton).toBeDisabled()
@@ -455,12 +455,12 @@ test.describe('Toolbar', () => {
   })
 
   test('redo button exists', async ({ page }) => {
-    const redoButton = page.getByRole('button', { name: 'Redo (Ctrl+Y)' })
+    const redoButton = page.getByRole('button', { name: 'Redo (Control+Y)' })
     await expect(redoButton).toBeVisible()
     await expect(redoButton).toBeDisabled()
 
     await seedTextClip(page)
-    await page.getByRole('button', { name: 'Undo (Ctrl+Z)' }).click()
+    await page.getByRole('button', { name: 'Undo (Control+Z)' }).click()
     await expect(page.getByText(/^0 clips/)).toBeVisible()
     await expect(redoButton).toBeEnabled()
 

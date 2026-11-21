@@ -43,6 +43,7 @@
  * frame-rate probe's (Chromium only, ESCSUITE-327).
  */
 
+import { isFirefoxEngine as isFirefoxUserAgent } from '@escapesuite/shared/utils';
 import { isChromiumEngine, type EngineNavigator } from './browserEngine';
 
 export type { EngineNavigator };
@@ -70,11 +71,11 @@ export function isMeasuredFrameRateEngine(nav: EngineNavigator | undefined): boo
 }
 
 /**
- * Firefox, by its `Gecko/` and `Firefox/` tokens — the one Firefox test. The
- * WebM exporter reads it too, to gate its colour relabel (ESCSUITE-284,
- * `exportWebM.ts` and `vpxColorLabel.ts`).
+ * Firefox, by its `Gecko/` and `Firefox/` tokens — the one Firefox test, which
+ * lives in `@escapesuite/shared/utils` because CRAFT's recorder gates its colour
+ * relabel on it too (ESCSUITE-503). The WebM exporter reads it here, to gate
+ * its own (ESCSUITE-284, `exportWebM.ts` and `vpxColorLabel.ts`).
  */
 export function isFirefoxEngine(nav: EngineNavigator | undefined): boolean {
-  if (!nav) return false;
-  return /Gecko\//.test(nav.userAgent) && /Firefox\//.test(nav.userAgent);
+  return isFirefoxUserAgent(nav);
 }

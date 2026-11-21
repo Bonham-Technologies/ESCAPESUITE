@@ -13,7 +13,9 @@
   the primary. Every VP9 encoder's packets pass through `createVp9ColourSpaceStamper`
   (`@escapesuite/shared/utils`), which writes the encoder's reported colour matrix into each key
   frame header's `color_space` for Firefox's `<video>` and ffmpeg, as Mediabunny's muxer did up to
-  1.65 (ARTIST's `webm-export-reliability.md`, ESCSUITE-284)
+  1.65 (ARTIST's `webm-export-reliability.md`, ESCSUITE-284). In Firefox, a canvas-fed encoder's
+  report is first corrected by `relabelFirefoxVpxMeta`, as ARTIST's export does (`webm-handling.md`,
+  "Firefox's colour label", ESCSUITE-503)
 - `frameTiming.ts`: `stampFrame()` — one encoder's `FrameTiming`: the 30 fps slot each frame is
   stamped in, so no two frames share a WebM timecode, and its once-a-second key frame (see "Frame
   timestamps and keyframes", ESCSUITE-417)

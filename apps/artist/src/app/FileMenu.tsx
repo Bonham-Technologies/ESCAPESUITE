@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { nextMenuIndex } from './menuNavigation';
+import { chordLabel, chordSpoken, currentShortcutPlatform, type ShortcutPlatform } from '../utils/shortcutKeys';
 import styles from '../App.module.css';
 
 interface FileMenuProps {
@@ -28,12 +29,18 @@ interface FileMenuProps {
   isSaving: boolean;
   /** There is something on the timeline to export. */
   canExport: boolean;
+  /** Whose modifier the hints name; read from the browser when absent (ESCSUITE-491). */
+  platform?: ShortcutPlatform;
 }
 
 /** One row of the dropdown. */
 interface FileMenuItem {
   label: string;
-  /** Only a chord the cascade binds (`BOUND_CHORDS`); absent when none is. */
+  /**
+   * The letter of the Ctrl/Cmd chord that runs it, shown as the platform
+   * writes it (`⌘O`, `Ctrl+O`; ESCSUITE-491). Only a chord the cascade binds
+   * (`BOUND_CHORDS`); absent when none is.
+   */
   shortcut?: string;
   run: () => void | Promise<void>;
   disabled: boolean;
@@ -72,7 +79,9 @@ export function FileMenu({
   isLoading,
   isSaving,
   canExport,
+  platform,
 }: FileMenuProps) {
+  const onPlatform = platform ?? currentShortcutPlatform();
   const menuId = useId();
   const [activeIndex, setActiveIndex] = useState(0);
   // Written through a callback ref that drops React's unmount `null`, so the
@@ -94,14 +103,14 @@ export function FileMenu({
     },
     {
       label: 'Open Project...',
-      shortcut: 'Ctrl+O',
+      shortcut: 'O',
       run: onLoadProject,
       disabled: isLoading,
       separatorBefore: false,
     },
     {
       label: 'Save Project',
-      shortcut: 'Ctrl+S',
+      shortcut: 'S',
       run: onSaveProject,
       disabled: isSaving,
       separatorBefore: false,
@@ -111,7 +120,7 @@ export function FileMenu({
       : []),
     {
       label: 'Export Video...',
-      shortcut: 'Ctrl+E',
+      shortcut: 'E',
       run: onExport,
       disabled: !canExport,
       separatorBefore: true,
@@ -211,7 +220,17 @@ export function FileMenu({
                   disabled={item.disabled}
                 >
                   <span className={styles.menuItemLabel}>{item.label}</span>
-                  {item.shortcut && <span className={styles.menuItemShortcut}>{item.shortcut}</span>}
+                  {/* The hint as drawn is hidden from a screen reader, which
+                      hears the chord spelled out ("Command+O") as part of the
+                      item's name instead. */}
+                  {item.shortcut && (
+                    <>
+                      <span className={styles.menuItemShortcut} aria-hidden="true">
+                        {chordLabel(item.shortcut, onPlatform)}
+                      </span>
+                      <span className="visually-hidden"> {chordSpoken(item.shortcut, onPlatform)}</span>
+                    </>
+                  )}
                 </button>
               </Fragment>
             ))}

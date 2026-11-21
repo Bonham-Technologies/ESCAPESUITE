@@ -73,9 +73,12 @@ file and no fallback. WebM's shape now matches MP4's:
   range consistently.
 
   **The fix** is the smallest one the table allows. `exportWebM.ts`'s video `output:` callback hands
-  the muxer `relabelFirefoxVpxMeta(meta)` (`core/vpxColorLabel.ts`) in place of the encoder's own
-  metadata, on Firefox only — `isFirefoxEngine` in `core/workerDecodeEngine.ts`, the same `Gecko/` and
-  `Firefox/` test the decode worker's allow-list uses, decided once per export. The helper changes
+  the muxer `relabelFirefoxVpxMeta(meta)` (`@escapesuite/shared/utils`, through
+  `core/vpxColorLabel.ts`) in place of the encoder's own metadata, on Firefox only — `isFirefoxEngine`
+  in `core/workerDecodeEngine.ts` (which delegates to the shared one), the same `Gecko/` and
+  `Firefox/` test the decode worker's allow-list uses, decided once per export. Both moved to the
+  shared package when ESCAPECRAFT's recorder took the same correction for its canvas-built Firefox
+  frames (ESCSUITE-503, measured on a CRAFT take: CRAFT's `webm-handling.md`). The helper changes
   only the matrix, `'bt709'` → `'smpte170m'`, and only when the report is **exactly** the one Firefox
   155 was measured giving every time, for VP9 and VP8 at every size probed: `primaries`, `transfer`
   and `matrix` all `'bt709'` and `fullRange` `false` (review M1 narrowed it from the matrix alone).
