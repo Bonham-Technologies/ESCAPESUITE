@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.21.0
+
+### Minor Changes
+
+- 650f950: ESCAPECRAFT now keeps each recording on your device while it records. If the tab closes or crashes, or the recording ends in an error before it is saved, ESCAPECRAFT offers it back the next time you open it: Recover saves what was recorded to your library, and Discard deletes it. A recovered recording can be missing its last few seconds. In a browser that cannot keep the recording on the device (including older versions of Safari for screen-with-webcam-overlay and sound-only recordings, which they record as MP4), ESCAPECRAFT records in memory as before and tells you the recording is not protected if the tab closes. The Known limitations page now explains what this needs and what it can lose.
+- 93aa54a: After your first saved recording, import or project save in a visit, ESCAPECRAFT and ESCAPEARTIST ask your browser to keep their stored recordings and media instead of clearing them automatically, and say what it answered: "Protected from automatic clean-up", or "Your browser may delete these if it runs low on space; download what you want to keep." ESCAPECRAFT shows this under your recordings, ESCAPEARTIST beside the storage figure in the media library. The Known limitations page now explains that Safari can delete stored recordings and projects after seven days of using Safari without interacting with the site.
+- 8046e2e: The hosted site now works offline after the first visit. Once you have opened the hub, ESCAPECRAFT or ESCAPEARTIST on www.escapesuite.io while connected, that app opens and works with no connection, recording, editing and exporting included; open each app you want once while online. Chrome and Edge also offer to install each app. When a new version is published, the app saves it the next time you open it online and shows a short "Updated" note. Your recordings and projects are stored as before; this saves only the apps themselves.
+- 8ef5ae0: Your screen now stays on while ESCAPECRAFT records and while ESCAPEARTIST exports or transcribes, so a long job is not cut short by the display going to sleep. The export window says "Keeping the screen on until the export finishes." while it holds the lock. Browsers release the lock when the tab is hidden, and the apps take it again when you come back to the tab. Browsers without this feature work as before. The Known limitations page now explains that recording another window with ESCAPECRAFT hidden lets the screen sleep as your system settings say.
+
+### Patch Changes
+
+- cb5fab8: Deleting a recording in ESCAPECRAFT now asks first. The question names the recording and, when a take was recorded as several files (a separate webcam, microphone or system audio track), says how many files will be deleted. Cancel or Escape keeps it, and only the dialog's Delete button removes it. The question appears inside ESCAPECRAFT itself, so it also works when ESCAPECRAFT is embedded in another page.
+- 8ae8253: ESCAPE Suite's address is now escapesuite.io. Links to www.escapesuite.io still work and forward to the same page, and the Limitations page now names escapesuite.io.
+- b7fb2e2: Recordings made in Firefox now play back in their true colours. Firefox stored their colours one way but labelled them another, so every player showed them slightly off (reds and greens up to about a tenth too bright or too dark). ESCAPECRAFT now labels them correctly, the way ESCAPEARTIST already does for its Firefox exports.
+- Updated dependencies [93aa54a]
+- Updated dependencies [8ef5ae0]
+- Updated dependencies [b7fb2e2]
+  - @escapesuite/shared@1.5.0
+
 ## 2.20.0
 
 ### Patch Changes
