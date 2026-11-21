@@ -66,8 +66,13 @@ async function sheetKeys(page: Page, description: string): Promise<string[]> {
   await page.keyboard.press('Shift+Slash')
   const sheet = page.getByRole('dialog', { name: 'Keyboard Shortcuts' })
   await expect(sheet).toBeVisible()
-  const row = sheet.getByText(description, { exact: true }).first().locator('..')
-  return row.locator('kbd').allTextContents()
+  const keys = sheet.getByText(description, { exact: true }).first().locator('..').locator('kbd')
+  // One key at a time: on this sheet `allTextContents()` (and any
+  // `evaluateAll`) crashes Firefox's page, while a single element's
+  // `textContent()` reads fine.
+  const texts: string[] = []
+  for (let i = 0, n = await keys.count(); i < n; i++) texts.push((await keys.nth(i).textContent()) ?? '')
+  return texts
 }
 
 test.describe('ESCSUITE-491: shortcut hints name the platform\'s own modifier', () => {
