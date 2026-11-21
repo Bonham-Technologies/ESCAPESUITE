@@ -99,3 +99,30 @@ describe('the spellings', () => {
     expect(chordSpoken('Z', 'other')).toBe('Control+Z')
   })
 })
+
+// ⌘M minimises the window (and ⌘H, ⌘Q, ⌘W, ⌘N, ⌘T are macOS's or the
+// browser's) before the page sees it, while Control+M reaches the cascade,
+// which answers Ctrl too. So on a Mac those chords name Control.
+describe('chords macOS keeps for itself', () => {
+  it('names Control for them on Apple platforms, in either case', () => {
+    expect(modifierKey('apple', 'M')).toBe('⌃')
+    expect(modifierKey('apple', 'm')).toBe('⌃')
+    expect(modifierKeyName('apple', 'M')).toBe('Control')
+    expect(chordLabel('M', 'apple')).toBe('⌃M')
+    expect(chordSpoken('M', 'apple')).toBe('Control+M')
+    for (const key of ['H', 'Q', 'W', 'N', 'T']) expect(chordLabel(key, 'apple')).toBe(`⌃${key}`)
+  })
+
+  it('leaves them as Ctrl elsewhere', () => {
+    expect(modifierKey('other', 'M')).toBe('Ctrl')
+    expect(chordLabel('M', 'other')).toBe('Ctrl+M')
+    expect(chordSpoken('M', 'other')).toBe('Control+M')
+  })
+
+  it('keeps ⌘ for every other chord the cascade binds', () => {
+    for (const key of ['Z', 'Y', 'C', 'V', 'D', 'S', 'O', 'E', 'B']) {
+      expect(chordLabel(key, 'apple')).toBe(`⌘${key}`)
+      expect(chordSpoken(key, 'apple')).toBe(`Command+${key}`)
+    }
+  })
+})

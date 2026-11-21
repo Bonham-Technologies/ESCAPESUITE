@@ -46,25 +46,49 @@ export function currentShortcutPlatform(): ShortcutPlatform {
   return shortcutPlatform(typeof navigator === 'undefined' ? undefined : navigator);
 }
 
-/** The modifier as a hint shows it: `⌘` or `Ctrl`. */
-export function modifierKey(platform: ShortcutPlatform): string {
+/**
+ * Letters whose ⌘ chord macOS or the browser keeps for itself, so a page never
+ * sees it: ⌘H hides the app, ⌘M minimises the window, ⌘Q quits, and ⌘W, ⌘N,
+ * ⌘T close a tab or open a window or tab. The cascade answers Ctrl as well
+ * (`e.ctrlKey || e.metaKey`), and a Mac's Control chord does reach the page,
+ * so on Apple platforms a hint for one of these names Control (`⌃M`) instead
+ * of ⌘. Of these the cascade binds only M (go to previous marker).
+ */
+const APPLE_KEEPS_COMMAND = new Set(['h', 'm', 'q', 'w', 'n', 't']);
+
+/** On this platform, is `key`'s chord pressed with Control because ⌘ is taken? */
+function controlOnApple(platform: ShortcutPlatform, key: string | undefined): boolean {
+  return platform === 'apple' && key !== undefined && APPLE_KEEPS_COMMAND.has(key.toLowerCase());
+}
+
+/**
+ * The modifier as a hint shows it: `⌘` or `Ctrl`. Given the chord's letter, a
+ * chord macOS keeps for itself shows `⌃` (Control) on Apple platforms.
+ */
+export function modifierKey(platform: ShortcutPlatform, key?: string): string {
+  if (controlOnApple(platform, key)) return '⌃';
   return platform === 'apple' ? '⌘' : 'Ctrl';
 }
 
-/** The modifier as a screen reader should say it: `Command` or `Control`. */
-export function modifierKeyName(platform: ShortcutPlatform): string {
+/**
+ * The modifier as a screen reader should say it: `Command` or `Control`; a
+ * chord macOS keeps for itself says `Control` on Apple platforms too.
+ */
+export function modifierKeyName(platform: ShortcutPlatform, key?: string): string {
+  if (controlOnApple(platform, key)) return 'Control';
   return platform === 'apple' ? 'Command' : 'Control';
 }
 
 /**
  * A modifier chord as a hint shows it: `⌘Z` on Apple platforms (written the
- * way macOS's own menus write it, with no plus) and `Ctrl+Z` elsewhere.
+ * way macOS's own menus write it, with no plus; `⌃M` for a chord macOS keeps)
+ * and `Ctrl+Z` elsewhere.
  */
 export function chordLabel(key: string, platform: ShortcutPlatform): string {
-  return platform === 'apple' ? `${modifierKey(platform)}${key}` : `${modifierKey(platform)}+${key}`;
+  return platform === 'apple' ? `${modifierKey(platform, key)}${key}` : `${modifierKey(platform, key)}+${key}`;
 }
 
 /** A modifier chord spelled out for a screen reader: `Command+Z` or `Control+Z`. */
 export function chordSpoken(key: string, platform: ShortcutPlatform): string {
-  return `${modifierKeyName(platform)}+${key}`;
+  return `${modifierKeyName(platform, key)}+${key}`;
 }

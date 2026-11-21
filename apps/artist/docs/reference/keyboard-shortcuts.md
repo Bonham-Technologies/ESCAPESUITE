@@ -51,7 +51,9 @@ same inside each item's name, and the toolbar's Undo / Redo take it as their `ar
 Export, the inspector's Duplicate, Remove silences' "⌘Z puts them back" and the delete-track question use
 `chordLabel`. The sheet's rows write the modifier as `MOD`; the sheet and the File menu take an optional
 `platform` prop for tests, and everything else reads `currentShortcutPlatform()` at render. Use these helpers
-for any new hint, never a literal "Ctrl".
+for any new hint, never a literal "Ctrl". A chord whose ⌘ form macOS or the browser keeps (⌘H, ⌘M, ⌘Q, ⌘W, ⌘N,
+⌘T never reach the page) is shown with Control on a Mac instead, `⌃M` / `Control+M`, since Control does reach
+it: Go to Previous Marker is the one bound today, as ⌘M minimises the window.
 
 **The sheet's colours meet AA in both themes.** The group headings use `--accent-text`, the accent
 as text: `#4a9eff` (= `--accent-primary`) in the dark theme and `#155fb8` in the light one, where

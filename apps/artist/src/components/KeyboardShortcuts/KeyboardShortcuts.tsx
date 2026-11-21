@@ -35,7 +35,8 @@ interface KeyboardShortcutsProps {
 /**
  * The chord modifier, which the sheet shows as the platform names it: ⌘ on
  * Apple platforms, Ctrl elsewhere, and Command / Control to a screen reader
- * (ESCSUITE-491). Every chord answers either key.
+ * (ESCSUITE-491). Every chord answers either key; a chord macOS keeps for
+ * itself (⌘M) shows Control on a Mac (⌃M).
  */
 const MOD = 'Mod';
 
@@ -167,8 +168,10 @@ export function KeyboardShortcuts({ isOpen, onClose, platform }: KeyboardShortcu
   if (!isOpen) return null;
 
   const onPlatform = platform ?? currentShortcutPlatform();
-  const shown = (key: string) => (key === MOD ? modifierKey(onPlatform) : key);
-  const spoken = (key: string) => (key === MOD ? modifierKeyName(onPlatform) : key);
+  // `letter` is the row's last key: a chord macOS keeps for itself (⌘M
+  // minimises the window) names Control on a Mac instead (ESCSUITE-491).
+  const shown = (key: string, letter: string) => (key === MOD ? modifierKey(onPlatform, letter) : key);
+  const spoken = (key: string, letter: string) => (key === MOD ? modifierKeyName(onPlatform, letter) : key);
 
   return (
     <div className={styles.overlay} onClick={onClose}>
@@ -207,14 +210,14 @@ export function KeyboardShortcuts({ isOpen, onClose, platform }: KeyboardShortcu
                     <div className={styles.keys} aria-hidden="true">
                       {shortcut.keys.map((key, keyIndex) => (
                         <span key={keyIndex}>
-                          <kbd className={styles.key}>{shown(key)}</kbd>
+                          <kbd className={styles.key}>{shown(key, shortcut.keys[shortcut.keys.length - 1])}</kbd>
                           {keyIndex < shortcut.keys.length - 1 && (
                             <span className={styles.plus}>+</span>
                           )}
                         </span>
                       ))}
                     </div>
-                    <span className="visually-hidden">{shortcut.keys.map(spoken).join('+')}</span>
+                    <span className="visually-hidden">{shortcut.keys.map((key) => spoken(key, shortcut.keys[shortcut.keys.length - 1])).join('+')}</span>
                     <span className={styles.description}>{shortcut.description}</span>
                   </div>
                 ))}

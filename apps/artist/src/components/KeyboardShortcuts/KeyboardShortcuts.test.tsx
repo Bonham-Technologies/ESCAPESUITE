@@ -278,7 +278,7 @@ describe('KeyboardShortcuts matches the keys the app binds', () => {
     const unbound: string[] = []
     for (const row of Array.from(document.querySelectorAll(`.${styles.shortcutRow}`))) {
       const keys = Array.from(row.querySelectorAll('kbd')).map((k) => k.textContent ?? '')
-      if (keys[0] !== modifierKey(platform)) continue
+      if (keys[0] !== modifierKey(platform, keys[keys.length - 1])) continue
       const id = `${keys[keys.length - 1].toLowerCase()}${keys.includes('Shift') ? '+shift' : ''}`
       chordRows.push(id)
       if (!bound.has(id)) unbound.push(keys.join('+'))
@@ -315,7 +315,10 @@ describe('KeyboardShortcuts names the platform\'s modifier', () => {
 
     expect(keysOf('Undo')).toEqual(['⌘', 'Z'])
     expect(keysOf('Save Project')).toEqual(['⌘', 'S'])
-    expect(keysOf('Go to Previous Marker')).toEqual(['⌘', 'M'])
+    // ⌘M minimises the window before the page sees it; Control+M reaches it.
+    expect(keysOf('Go to Previous Marker')).toEqual(['⌃', 'M'])
+    expect(screen.getByText('Control+M')).toBeInTheDocument()
+    expect(screen.queryByText('Command+M')).not.toBeInTheDocument()
     expect(allKeys()).not.toContain('Ctrl')
     const undoRow = screen.getByText('Undo').closest(`.${styles.shortcutRow}`)!
     expect(undoRow.querySelector(`.${styles.keys}`)).toHaveAttribute('aria-hidden', 'true')
@@ -328,6 +331,7 @@ describe('KeyboardShortcuts names the platform\'s modifier', () => {
 
     expect(keysOf('Undo')).toEqual(['Ctrl', 'Z'])
     expect(keysOf('Export Video')).toEqual(['Ctrl', 'E'])
+    expect(keysOf('Go to Previous Marker')).toEqual(['Ctrl', 'M'])
     expect(allKeys()).not.toContain('⌘')
     expect(screen.getByText('Undo').closest(`.${styles.shortcutRow}`)).toHaveTextContent('Control+Z')
   })
