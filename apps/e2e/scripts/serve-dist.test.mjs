@@ -180,9 +180,9 @@ test('resolveFile 404s a /_vercel path instead of falling through to the SPA', (
 
 /**
  * Builds a minimal real `dist/` layout: the hub's `index.html` and its
- * `404.html` (a byte-for-byte copy, exactly as `scripts/build-all.mjs`
- * produces it — the "SPA fallback body" a miss is supposed to come back
- * with), ESCAPECRAFT's and ESCAPEARTIST's own `index.html`, and two
+ * `404.html` (the same bytes here; the real build gives it the not-found
+ * head, ESCSUITE-489 — either way the "SPA fallback body" a miss is supposed
+ * to come back with), ESCAPECRAFT's and ESCAPEARTIST's own `index.html`, and two
  * ordinary root-level static files (one with an extension, one without —
  * `robots.txt` and a `CNAME`-shaped file) to stand in for ESCAPEPLAN's own
  * build output, plus the hub routes' own copies of its page
@@ -393,8 +393,8 @@ test('assertVercelSettingsSupported throws if cleanUrls or trailingSlash is ever
 
 // HTTP-level: proves the behaviour through a real server and real response,
 // not just the pure resolver — a genuine miss comes back 404 with the SPA
-// fallback body (dist/404.html, a byte-for-byte copy of the hub's own
-// index.html per scripts/build-all.mjs), and an ordinary hub route comes
+// fallback body (dist/404.html, the hub's own page; this fixture's copy has
+// the same bytes as its index.html), and an ordinary hub route comes
 // back 200 with its own copy of the hub's page (ESCSUITE-458).
 test('HTTP: a genuine miss serves 404.html with status 404; a hub route serves index.html with 200', async () => {
   const { dir, hubHtml } = buildTempDist()

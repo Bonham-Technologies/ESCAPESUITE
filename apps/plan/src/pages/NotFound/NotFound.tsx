@@ -1,19 +1,15 @@
 import { Link } from 'react-router-dom'
 import { toolUrl } from '../../lib/launch'
-import { useSeo } from '../../lib/seo'
+import { useNotFoundSeo } from '../../lib/seo'
 import legal from '../Legal/Legal.module.css'
 
 /**
  * Shown for any path that is not a hub route (ESCSUITE-455). On the hosted site
- * such a path answers 404 with `dist/404.html`, a copy of the hub's own page, so
- * this is what a mistyped link shows there too.
+ * such a path answers 404 with `dist/404.html`, the hub's own page with this
+ * page's head (ESCSUITE-489), so this is what a mistyped link shows there too.
  */
 export default function NotFound() {
-  useSeo({
-    title: 'Page not found — ESCAPE Suite',
-    description: 'This page does not exist. Go to the ESCAPE Suite home page, or open the recorder or the editor.',
-    canonicalPath: '/',
-  })
+  useNotFoundSeo()
 
   return (
     <div className={legal.legal}>
