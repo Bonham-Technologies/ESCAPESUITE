@@ -6,6 +6,7 @@ import type { ComponentProps } from 'react';
 import { FileMenu } from './FileMenu';
 import styles from '../App.module.css';
 import { BOUND_CHORDS } from './useAppKeyboardShortcuts';
+import { modifierKey, type ShortcutPlatform } from '../utils/shortcutKeys';
 
 function renderMenu(overrides: Partial<ComponentProps<typeof FileMenu>> = {}) {
   const props = {
@@ -75,19 +76,49 @@ describe('FileMenu', () => {
     expect(screen.getByText('Ctrl+E')).toBeInTheDocument();
   });
 
-  it('every shortcut hint it shows is a chord the cascade binds (ESCSUITE-269)', () => {
-    renderMenu();
+  it.each(['other', 'apple'] as const)(
+    'every shortcut hint it shows is a chord the cascade binds (ESCSUITE-269, %s)',
+    (platform: ShortcutPlatform) => {
+      renderMenu({ platform });
 
-    const hints = Array.from(document.querySelectorAll(`.${styles.menuItemShortcut}`)).map(
-      (el) => el.textContent ?? '',
-    );
-    expect(hints.length).toBeGreaterThan(0);
-    for (const hint of hints) {
-      const parts = hint.split('+');
-      expect(parts[0]).toBe('Ctrl');
-      const chord = { key: parts[parts.length - 1].toLowerCase(), shift: parts.includes('Shift') };
-      expect(BOUND_CHORDS).toContainEqual(chord);
-    }
+      const hints = Array.from(document.querySelectorAll(`.${styles.menuItemShortcut}`)).map(
+        (el) => el.textContent ?? '',
+      );
+      expect(hints.length).toBeGreaterThan(0);
+      for (const hint of hints) {
+        expect(hint.startsWith(modifierKey(platform))).toBe(true);
+        const rest = hint.slice(modifierKey(platform).length).replace(/^\+/, '');
+        const parts = rest.split('+');
+        const chord = { key: parts[parts.length - 1].toLowerCase(), shift: parts.includes('Shift') };
+        expect(BOUND_CHORDS).toContainEqual(chord);
+      }
+    },
+  );
+
+  // ESCSUITE-491: every chord answers Ctrl or Cmd, so a hint names the
+  // platform's own modifier, and a screen reader hears it spelled out. A
+  // browser puts a space between the label and the hint (both are flex items);
+  // jsdom lays nothing out, so the names allow for either.
+  it('shows ⌘ on an Apple platform, and names the item with Command', () => {
+    renderMenu({ platform: 'apple' });
+
+    expect(screen.getByText('⌘O')).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByText('⌘S')).toBeInTheDocument();
+    expect(screen.getByText('⌘E')).toBeInTheDocument();
+    expect(screen.queryByText(/Ctrl/)).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /^Open Project\.\.\.\s*Command\+O$/ })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /^Save Project\s*Command\+S$/ })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /^Export Video\.\.\.\s*Command\+E$/ })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'New Project' })).toBeInTheDocument();
+  });
+
+  it('shows Ctrl anywhere else, and names the item with Control', () => {
+    renderMenu({ platform: 'other' });
+
+    expect(screen.getByText('Ctrl+O')).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.queryByText(/⌘/)).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /^Open Project\.\.\.\s*Control\+O$/ })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /^Save Project\s*Control\+S$/ })).toBeInTheDocument();
   });
 
   it('asks to be toggled when the File button is pressed', async () => {
@@ -171,9 +202,11 @@ describe('FileMenu as a real menu (ESCSUITE-216)', () => {
     const menu = screen.getByRole('menu', { name: 'File options' });
     expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
       'New Project',
-      'Open Project...Ctrl+O',
-      'Save ProjectCtrl+S',
-      'Export Video...Ctrl+E',
+      // The hint as drawn, then the same chord spelled out for a screen
+      // reader (ESCSUITE-491); jsdom is not a Mac, so both say Control.
+      'Open Project...Ctrl+O Control+O',
+      'Save ProjectCtrl+S Control+S',
+      'Export Video...Ctrl+E Control+E',
     ]);
     // Every child carries a role the `menu` role allows — which is what
     // `aria-required-children` is really asking.
@@ -281,7 +314,7 @@ describe('FileMenu arrow-key navigation (ESCSUITE-216)', () => {
     const user = userEvent.setup();
     renderMenu({ isSaving: true });
     const items = screen.getAllByRole('menuitem');
-    expect(labels(items)[2]).toBe('Save ProjectCtrl+S');
+    expect(labels(items)[2]).toBe('Save ProjectCtrl+S Control+S');
 
     await user.keyboard('{ArrowDown}{ArrowDown}');
 
