@@ -7,10 +7,14 @@
  * pins to `routes.ts`, the list `App.tsx` registers) plus the two tools.
  * `sitemap.test.ts` reads the router itself and fails when the two disagree.
  *
- * Pure strings with no DOM, React or Node, because `vite.config.ts` imports it
- * in Node and the tests run it in jsdom; the build passes in the `git` runner.
+ * Each hub page's `<lastmod>` comes from the committed `sitemap-lastmod.json`
+ * (ESCSUITE-490), so the date is the same in any clone and without git.
+ *
+ * Pure data and strings with no DOM, React or Node, because `vite.config.ts`
+ * imports it in Node and the tests run it in jsdom.
  */
 import { ROUTE_PATHS, SITE_URL, type HubPath } from './routeMeta'
+import pageLastmod from './sitemap-lastmod.json'
 
 /** Where the hosted site serves each tool. `launch.ts` links to them here. */
 export const TOOL_PATHS = { craft: '/craft/', artist: '/artist/' } as const
@@ -18,54 +22,36 @@ export const TOOL_PATHS = { craft: '/craft/', artist: '/artist/' } as const
 /** Every path the sitemap lists: the hub's pages, then the tools. */
 export const SITEMAP_PATHS: readonly string[] = [...ROUTE_PATHS, ...Object.values(TOOL_PATHS)]
 
-/**
- * The source files (relative to `apps/plan`) whose last commit dates each hub
- * page's `lastmod`. The tools have none: their sources are another package's,
- * so the hub's cached build would not notice them change and could publish an
- * old date.
- */
-export const PAGE_SOURCES: Record<HubPath, readonly string[]> = {
-  '/': ['src/pages/Home.tsx'],
-  '/privacy': ['src/pages/Legal/Privacy.tsx'],
-  '/terms': ['src/pages/Legal/Terms.tsx'],
-  '/limitations': ['src/pages/Limitations/Limitations.tsx', 'src/pages/Limitations/limitations.ts'],
+export interface PageLastmod {
+  /** The day the page last changed, `YYYY-MM-DD`. */
+  lastmod: string
+  /** The files (relative to `apps/plan`) that make up the page. */
+  sources: readonly string[]
+  /** SHA-256 of `sources`, which `scripts/sitemap-lastmod.test.mjs` checks. */
+  sha256: string
 }
 
-/** Runs `git` with `args` and returns its stdout, or `null` when it failed. */
-export type Git = (args: readonly string[]) => string | null
-
-/** git's strict ISO 8601 committer date (`%cI`). */
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$/
-
 /**
- * The committer date of the last commit that changed any of `sources`, or
- * `undefined` when it isn't known for sure: no sources, no git, not a
- * repository, or never committed. A parentless commit counts only in a full
- * clone, where it is the repository's first commit; in a shallow clone (as a
- * hosting build may use) it is where the fetched history was cut off, and git
- * reports it as adding every file, so its date says nothing about the page.
+ * Each hub page's `lastmod`, from the committed `sitemap-lastmod.json`
+ * (ESCSUITE-490). Typed as a record of every hub route, so a route without an
+ * entry does not compile. The dates used to come from git at build time, but
+ * the hosting builds from a shallow clone, where the history is cut off and
+ * every page lost its date. `scripts/sitemap-lastmod.test.mjs` fails when a
+ * page's files change and its entry does not; `pnpm sitemap:stamp` moves the
+ * date to today. The tools have no entry: their sources are other packages',
+ * which the hub's Turbo-cached build would not notice change.
  */
-export function lastCommitDate(git: Git, sources: readonly string[]): string | undefined {
-  if (sources.length === 0) return undefined
-  const line = git(['log', '-1', '--format=%cI%x00%P', '--', ...sources])?.trim()
-  if (!line) return undefined
-  const [date, parents] = line.split('\u0000')
-  // Anything but a plain ISO 8601 date (say, signature lines from a local log.showSignature) is dropped.
-  if (!ISO_DATE.test(date)) return undefined
-  if (!parents && git(['rev-parse', '--is-shallow-repository'])?.trim() !== 'false') return undefined
-  return date
-}
+export const PAGE_LASTMOD: Record<HubPath, PageLastmod> = pageLastmod
 
 export interface SitemapEntry {
   loc: string
   lastmod?: string
 }
 
-/** One entry per `SITEMAP_PATHS` path, on the canonical host. */
-export function sitemapEntries(git: Git): SitemapEntry[] {
+/** One entry per `SITEMAP_PATHS` path, on the canonical host, the hub's pages dated. */
+export function sitemapEntries(): SitemapEntry[] {
   return SITEMAP_PATHS.map((path) => {
-    const sources = (PAGE_SOURCES as Record<string, readonly string[]>)[path] ?? []
-    const lastmod = lastCommitDate(git, sources)
+    const lastmod = (PAGE_LASTMOD as Partial<Record<string, PageLastmod>>)[path]?.lastmod
     return lastmod ? { loc: `${SITE_URL}${path}`, lastmod } : { loc: `${SITE_URL}${path}` }
   })
 }

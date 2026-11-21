@@ -1,9 +1,8 @@
-import { execFileSync } from 'node:child_process'
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { visualizer } from 'rollup-plugin-visualizer'
 import { ROUTE_PATHS, applyRouteHead, hubPathFor, routeHtmlFile } from './src/lib/routeMeta.ts'
-import { buildSitemapXml, sitemapEntries, type Git } from './src/lib/sitemap.ts'
+import { buildSitemapXml, sitemapEntries } from './src/lib/sitemap.ts'
 
 /**
  * Serves each hub route its own head before any JavaScript runs (ESCSUITE-458).
@@ -39,27 +38,16 @@ function routeHeads(): Plugin {
 
 /**
  * Writes `sitemap.xml` into the build (ESCSUITE-457) from `src/lib/sitemap.ts`,
- * so every page the router serves is listed. A page's `lastmod` is the date of
- * the last commit to its source; without git, or where a shallow clone can't
- * tell, the entry has no `lastmod` rather than a made-up one.
+ * so every page the router serves is listed. A hub page's `lastmod` comes from
+ * the committed `src/lib/sitemap-lastmod.json` (ESCSUITE-490), not from git,
+ * whose history a shallow clone cuts off.
  */
 function sitemap(): Plugin {
-  let root = process.cwd()
-  const git: Git = (args) => {
-    try {
-      return execFileSync('git', [...args], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-    } catch {
-      return null
-    }
-  }
   return {
     name: 'escapeplan-sitemap',
     apply: 'build',
-    configResolved(config) {
-      root = config.root
-    },
     generateBundle() {
-      this.emitFile({ type: 'asset', fileName: 'sitemap.xml', source: buildSitemapXml(sitemapEntries(git)) })
+      this.emitFile({ type: 'asset', fileName: 'sitemap.xml', source: buildSitemapXml(sitemapEntries()) })
     },
   }
 }

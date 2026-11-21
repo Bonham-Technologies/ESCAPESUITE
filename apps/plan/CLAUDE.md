@@ -54,6 +54,7 @@ src/
 ├── lib/
 │   ├── launch.ts          # Tool URLs + "launch tool"/"offline build downloaded" analytics events
 │   ├── sitemap.ts         # sitemap.xml the build writes from the route list (ESCSUITE-457)
+│   ├── sitemap-lastmod.json # each hub page's <lastmod>; `pnpm sitemap:stamp` (ESCSUITE-490)
 │   └── analytics.ts       # Vercel Analytics tracking
 └── pages/
     ├── Home.tsx            # Landing page — links to ESCAPECRAFT and ESCAPEARTIST
