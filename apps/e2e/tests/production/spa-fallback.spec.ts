@@ -30,12 +30,20 @@ test.describe('production: vercel.json rewrite parity (ESCSUITE-196)', () => {
     expect(missResponse.status()).toBe(404)
 
     // dist/404.html is the hub's own page (the "SPA fallback body"): it loads
-    // the same script, so the hub's router renders its not-found page.
+    // the same script, so the hub's router renders its not-found page. Since
+    // ESCSUITE-489 its head is the not-found one; everything else (scripts,
+    // stylesheets, body) still matches the hub's page byte for byte.
     const hubScript = (html: string) => /<script type="module"[^>]*src="(\/assets\/[^"]+\.js)"/.exec(html)?.[1]
-    const indexResponse = await request.get('http://localhost:5190/')
+    const withoutNotFoundHead = (html: string) =>
+      withoutRouteHead(html)
+        .replace(/\n?[ \t]*<link\s+rel="canonical"[^>]*>/, '')
+        .replace(/\n?[ \t]*<meta\s+property="og:url"[^>]*>/, '')
+        .replace(/\n?[ \t]*<meta\s+name="robots"[^>]*>/, '')
+    const indexHtml = await (await request.get('http://localhost:5190/')).text()
     const missHtml = await missResponse.text()
     expect(hubScript(missHtml), 'the 404 page loads the hub').toBeTruthy()
-    expect(hubScript(missHtml)).toBe(hubScript(await indexResponse.text()))
+    expect(hubScript(missHtml)).toBe(hubScript(indexHtml))
+    expect(withoutNotFoundHead(missHtml)).toBe(withoutNotFoundHead(indexHtml))
   })
 
   // ESCSUITE-489: dist/404.html was a byte-for-byte copy of the home page, so a
