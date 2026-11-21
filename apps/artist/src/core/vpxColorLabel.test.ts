@@ -22,7 +22,7 @@ import {
   Output,
   WebMOutputFormat,
 } from 'mediabunny'
-import { createWebMVideoLabeller, relabelFirefoxVpxMeta } from './vpxColorLabel'
+import { createWebMVideoLabeller } from './vpxColorLabel'
 
 /** What Firefox 155 reports for both VP9 and VP8 (measured 2026-10-11). */
 const FIREFOX_REPORT: VideoColorSpaceInit = {
@@ -36,62 +36,8 @@ const metaWith = (codec: string, colorSpace?: VideoColorSpaceInit): EncodedVideo
   decoderConfig: { codec, codedWidth: 1920, codedHeight: 1080, ...(colorSpace ? { colorSpace } : {}) },
 })
 
-describe('relabelFirefoxVpxMeta', () => {
-  it('relabels the matrix BT.601 (smpte170m) and leaves primaries, transfer and range alone', () => {
-    const meta = metaWith('vp09.00.10.08', FIREFOX_REPORT)
-    expect(relabelFirefoxVpxMeta(meta)?.decoderConfig?.colorSpace).toEqual({
-      primaries: 'bt709',
-      transfer: 'bt709',
-      matrix: 'smpte170m',
-      fullRange: false,
-    })
-  })
-
-  it('keeps the rest of the decoder configuration and does not mutate what the encoder handed over', () => {
-    const meta = metaWith('vp8', FIREFOX_REPORT)
-    const out = relabelFirefoxVpxMeta(meta)
-    expect(out?.decoderConfig).toMatchObject({ codec: 'vp8', codedWidth: 1920, codedHeight: 1080 })
-    expect(meta.decoderConfig?.colorSpace?.matrix).toBe('bt709')
-    expect(out).not.toBe(meta)
-  })
-
-  it('passes a chunk with no decoder configuration through untouched (every delta chunk)', () => {
-    const delta: EncodedVideoChunkMetadata = {}
-    expect(relabelFirefoxVpxMeta(delta)).toBe(delta)
-    expect(relabelFirefoxVpxMeta(undefined)).toBeUndefined()
-  })
-
-  it('leaves any other report alone: only the measured mislabel is corrected', () => {
-    const corrected = metaWith('vp8', { ...FIREFOX_REPORT, matrix: 'smpte170m' })
-    const unlabelled = metaWith('vp8')
-    expect(relabelFirefoxVpxMeta(corrected)).toBe(corrected)
-    expect(relabelFirefoxVpxMeta(unlabelled)).toBe(unlabelled)
-  })
-
-  // Review M1: the gate is the whole measured report, not its matrix alone. A
-  // Firefox that fixes its encoder the way Chromium works today — converting
-  // with BT.709 and reporting sRGB transfer at full range — changes its report
-  // and so falls out of the gate on its own instead of being relabelled wrong.
-  it('passes the Chromium-shaped report through untouched (BT.709 matrix, sRGB transfer, full range)', () => {
-    const chromiumShaped = metaWith('vp09.00.10.08', {
-      primaries: 'bt709',
-      transfer: 'iec61966-2-1',
-      matrix: 'bt709',
-      fullRange: true,
-    })
-    expect(relabelFirefoxVpxMeta(chromiumShaped)).toBe(chromiumShaped)
-  })
-
-  it.each([
-    ['primaries', { primaries: 'smpte170m' }],
-    ['transfer', { transfer: 'iec61966-2-1' }],
-    ['range', { fullRange: true }],
-    ['range left unreported', { fullRange: undefined }],
-  ] as const)('passes a report that differs from the measured one only in its %s through untouched', (_, change) => {
-    const meta = metaWith('vp09.00.10.08', { ...FIREFOX_REPORT, ...change })
-    expect(relabelFirefoxVpxMeta(meta)).toBe(meta)
-  })
-})
+// `relabelFirefoxVpxMeta` itself is tested where it lives, in
+// `@escapesuite/shared`'s `utils/firefoxVpxColour.test.ts`.
 
 // --- the real muxer over byte fixtures -------------------------------------
 

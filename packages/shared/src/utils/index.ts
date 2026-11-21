@@ -20,4 +20,6 @@ export {
   type Vp9PacketLike,
 } from './vp9ColourSpace'
 
+export { isFirefoxEngine, relabelFirefoxVpxMeta } from './firefoxVpxColour'
+
 export { holdScreenAwake, type ScreenAwakeHold, type HoldScreenAwakeOptions } from './screenWakeLock'

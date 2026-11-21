@@ -31,9 +31,10 @@ import { VP9_COLOR_SPACE, VP9_COLOR_SPACE_FOR_MATROSKA_MATRIX, readVp9KeyFrameHe
  * holds:
  *
  * - each key frame's `color_space` is the matrix the file should carry:
- *   BT.709 (2) in Chromium; for an ARTIST export in Firefox, the SMPTE 170M
- *   (3) ESCSUITE-284 relabels Firefox's report to; otherwise the encoder's own
- *   report, recorded by wrapping `VideoEncoder`;
+ *   BT.709 (2) in Chromium; for an ARTIST export or a CRAFT take in Firefox,
+ *   the SMPTE 170M (3) ESCSUITE-284 relabels Firefox's report to (CRAFT since
+ *   ESCSUITE-503); otherwise the encoder's own report, recorded by wrapping
+ *   `VideoEncoder`;
  * - and it agrees with the Colour element's MatrixCoefficients, so Firefox's
  *   `<video>` and Chromium's read the same matrix.
  *
@@ -46,10 +47,12 @@ import { VP9_COLOR_SPACE, VP9_COLOR_SPACE_FOR_MATROSKA_MATRIX, readVp9KeyFrameHe
  * stops working (with both call sites disabled, ARTIST and CRAFT alike: "the
  * first key frame's color_space is unknown, want BT.709").
  *
- * A CRAFT take in Firefox is held to Firefox's own report, as CRAFT relabels
- * nothing; ESCSUITE-284's measurement says that report is BT.709 over BT.601
- * pixels for a canvas-built frame, which CRAFT's Firefox capture path is. The
- * case notes it when it sees that report.
+ * A CRAFT take in Firefox is built from canvas frames (Firefox has no
+ * `MediaStreamTrackProcessor`), the case ESCSUITE-284 measured as BT.601
+ * pixels under a BT.709 report. ESCSUITE-503 measured a CRAFT take itself in
+ * Firefox 159 (Linux): BT.601 within 1.2 code values, BT.709 up to 16.9 out.
+ * So CRAFT relabels that exact report too, and the case holds it to SMPTE
+ * 170M like an ARTIST export.
  *
  * Runs in every project. CI's gating job runs Chromium only; the Nightly's
  * Firefox project picks this spec up like every other under `tests/`
@@ -159,7 +162,7 @@ async function vp9Report(page: Page): Promise<EncoderReport> {
   return vp9[0]
 }
 
-/** Firefox 155's report for a canvas-built frame, which ARTIST relabels to BT.601 (`relabelFirefoxVpxMeta`). */
+/** Firefox's report for a canvas-built frame, which ARTIST and CRAFT relabel to BT.601 (`relabelFirefoxVpxMeta`). */
 function isFirefoxMislabel(report: EncoderReport): boolean {
   const cs = report.colorSpace
   return cs?.primaries === 'bt709' && cs.transfer === 'bt709' && cs.matrix === 'bt709' && cs.fullRange === false
@@ -294,15 +297,10 @@ test.describe('ESCSUITE-485: VP9 key frame headers carry the colour matrix', () 
       await expectForced(page, forceUnknown, browserName)
       const report = await vp9Report(page)
       test.info().annotations.push({ type: 'VP9 encoder report', description: JSON.stringify(report.colorSpace) })
-      // CRAFT relabels nothing: the header carries the encoder's own report.
-      if (browserName === 'firefox' && isFirefoxMislabel(report)) {
-        test.info().annotations.push({
-          type: 'note',
-          description: "Firefox's BT.709 report, which ESCSUITE-284 measured over BT.601 pixels: CRAFT keeps it",
-        })
-      }
       if (browserName === 'chromium') expect(report.colorSpace?.matrix, 'Chromium reports BT.709').toBe('bt709')
-      const expected = codeForReport(report)
+      // ESCSUITE-503: Firefox's canvas frames are BT.601 under a BT.709 report; CRAFT relabels it, as ARTIST does.
+      const expected =
+        browserName === 'firefox' && isFirefoxMislabel(report) ? VP9_COLOR_SPACE.smpte170m : codeForReport(report)
       expectKeyFrameColourSpace(layout, expected)
     })
   }
