@@ -293,9 +293,21 @@ export async function exportToWebM(
     // measured on.
     const labelVideo = createWebMVideoLabeller(videoCodecFamily, isFirefoxEngine(globalThis.navigator));
     const videoEncoder = new VideoEncoder({
+      // ESCSUITE-499: nobody awaits what an `output:` callback returns, so a
+      // muxer write that fails rejects into the page as an unhandled
+      // rejection. Closing the encoders before the cancel (see the catch)
+      // stops new packets, not those already handed over: behind a slow file
+      // their writes are still pending at Cancel and land on a stream the
+      // cancel is closing. The failure becomes the track's error instead,
+      // which the frame loop and the pre-finalize check rethrow, and which a
+      // stopped export has no more use for.
       output: async (chunk, meta) => {
         const labelled = labelVideo(EncodedPacket.fromEncodedChunk(chunk), meta);
-        await videoSource.add(labelled.packet, labelled.meta);
+        try {
+          await videoSource.add(labelled.packet, labelled.meta);
+        } catch (e) {
+          videoEncoderError ??= e instanceof Error ? e : new Error(String(e));
+        }
       },
       error: (e) => {
         console.error('Video encoder error:', e);
@@ -312,8 +324,13 @@ export async function exportToWebM(
     let audioEncoderError: Error | null = null;
     if (audioData && audioSource) {
       audioEncoder = new AudioEncoder({
+        // As the video track's (ESCSUITE-499).
         output: async (chunk, meta) => {
-          await audioSource!.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+          try {
+            await audioSource!.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+          } catch (e) {
+            audioEncoderError ??= e instanceof Error ? e : new Error(String(e));
+          }
         },
         error: (e) => {
           console.error('Audio encoder error:', e);

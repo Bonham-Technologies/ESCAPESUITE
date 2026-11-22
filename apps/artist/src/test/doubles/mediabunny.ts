@@ -65,6 +65,20 @@ export interface MediabunnyState {
    * test asks whether the encoders were closed before the muxer was cancelled.
    */
   lateAdds: number
+  /**
+   * Set to hold every `add()` until it resolves: a write the target has not
+   * finished yet, as behind the e2e spec's slow file (ESCSUITE-499). A held
+   * add that resumes after the output was cancelled rejects the way the real
+   * one does there, with the stream closing under it, and counts in
+   * `lateWrites`.
+   */
+  addGate: Promise<void> | null
+  /** Held adds that resumed on a cancelled output and rejected (ESCSUITE-499). */
+  lateWrites: number
+  /** Set to make every `add()` reject: a muxer refusing packets mid-encode (ESCSUITE-499). */
+  addError: Error | null
+  /** Limits `addError` to one track kind; null refuses both. */
+  addErrorKind: 'video' | 'audio' | null
 }
 
 const state: MediabunnyState = {
@@ -80,6 +94,10 @@ const state: MediabunnyState = {
   finalizeError: null,
   cancelError: null,
   lateAdds: 0,
+  addGate: null,
+  lateWrites: 0,
+  addError: null,
+  addErrorKind: null,
 }
 
 export class BufferTargetDouble {
@@ -123,10 +141,21 @@ export class PacketSourceDouble {
   /** The output this source was added to, set by `addVideoTrack`/`addAudioTrack`. */
   output: OutputDouble | null = null
   readonly add = vi.fn(async (packet: unknown, meta?: unknown) => {
+    // A function, not a narrowed field read: the gate below awaits in between.
+    const canceled = () => this.output?.state === 'canceled'
     // What the real source does once its output has been cancelled.
-    if (this.output?.state === 'canceled') {
+    if (canceled()) {
       state.lateAdds += 1
       throw new Error('Output has been canceled.')
+    }
+    if (state.addError && (state.addErrorKind ?? this.kind) === this.kind) throw state.addError
+    if (state.addGate) {
+      await state.addGate
+      // Mediabunny's StreamTarget writing into a writer `cancel()` is closing.
+      if (canceled()) {
+        state.lateWrites += 1
+        throw new TypeError('Cannot write to a closing writable stream')
+      }
     }
     this.packets.push({ packet, meta })
   })
@@ -312,4 +341,8 @@ export function resetMediabunnyDouble(): void {
   state.finalizeError = null
   state.cancelError = null
   state.lateAdds = 0
+  state.addGate = null
+  state.lateWrites = 0
+  state.addError = null
+  state.addErrorKind = null
 }

@@ -1094,6 +1094,65 @@ describe('exportToWebM muxer cancellation', () => {
     expect(log.indexOf('AudioEncoder.close')).toBeLessThan(log.indexOf('Output.cancel'))
   })
 
+  it('drops a packet whose write was still in flight at Cancel, with no unhandled rejection (ESCSUITE-499)', async () => {
+    // Closing the encoders first stops new packets, but not the ones already
+    // handed to the muxer: behind a slow file their writes are still pending
+    // when the output is cancelled, and land on a stream that is closing. The
+    // rejection comes back out of the `output:` callback, which nobody awaits.
+    const rejections: unknown[] = []
+    const onRejection = (reason: unknown) => rejections.push(reason)
+    process.on('unhandledRejection', onRejection)
+    let release = () => {}
+    getMediabunnyState().addGate = new Promise<void>((resolve) => (release = resolve))
+    const controller = new AbortController()
+    try {
+      await expect(
+        run({
+          signal: controller.signal,
+          onProgress: (p) => {
+            if (p.message?.startsWith('Encoding frame 5/')) controller.abort()
+          },
+        })
+      ).rejects.toBeInstanceOf(ExportAbortedError)
+      expect(lastMediabunnyOutput().state).toBe('canceled')
+
+      release()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(getMediabunnyState().lateWrites).toBeGreaterThan(0)
+      expect(rejections).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onRejection)
+    }
+  })
+
+  it('fails the export with the muxer\'s refusal of an audio packet, before finalizing (ESCSUITE-499)', async () => {
+    getMediabunnyState().addError = new Error('Audio parameters must remain constant')
+    getMediabunnyState().addErrorKind = 'audio'
+    mixAudio.mockResolvedValue(audioFor(0.2))
+
+    const failure = await run().catch((e: unknown) => e)
+
+    expect(failure).toBeInstanceOf(ExportError)
+    expect((failure as ExportError).message).toContain('Audio parameters must remain constant')
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
+  })
+
+  it('fails the export with the muxer\'s refusal of a packet, instead of an unhandled rejection (ESCSUITE-499)', async () => {
+    // At the next frame, as an encoder error is: not first at the flush, which
+    // the real VideoEncoder resolves without waiting for its callbacks.
+    getMediabunnyState().addError = new Error('Video sample size must remain constant')
+
+    const failure = await run().catch((e: unknown) => e)
+
+    expect(failure).toBeInstanceOf(ExportError)
+    expect((failure as ExportError).message).toContain('Video sample size must remain constant')
+    expect(webcodecs.videoEncoders[0].encodes.length).toBeLessThan(6)
+    expect(webcodecs.videoEncoders[0].flushes).toBe(0)
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
+    expect(lastMediabunnyOutput().state).toBe('canceled')
+  })
+
   it('reports the export failure, not the muxer, when the cancel itself fails', async () => {
     webcodecs.script.videoErrorAfterEncodes = 2
     getMediabunnyState().cancelError = new Error('muxer would not let go')

@@ -219,19 +219,40 @@ test.describe('ESCSUITE-470: export and save to a file the user picks', () => {
 
     test('cancelling mid-export leaves no file behind', async ({ page }) => {
       test.setTimeout(120_000)
+      // ESCSUITE-499: the cancel leaves no error behind in the page either. A
+      // write still pending behind the slow file when Cancel closed the
+      // muxer's stream used to reject out of the encoder's output callback.
+      const pageErrors: string[] = []
+      page.on('pageerror', (error) => pageErrors.push(error.message))
+      await page.addInitScript(() => {
+        const w = window as unknown as { __rejections: string[] }
+        w.__rejections = []
+        window.addEventListener('unhandledrejection', (event) => w.__rejections.push(String(event.reason)))
+      })
       await installPickers(page)
       await openArtistWithTextClip(page)
-      // Slow every write, so the export is still running when Cancel lands.
-      await page.evaluate(() => ((window as unknown as PickerWindow).__writeDelayMs = 300))
+      // Slow every write, so the export is still running when Cancel lands,
+      // and so far behind the encoder that the muxer is waiting on the file
+      // with packets queued behind it: the muxer writes a Cluster a second,
+      // and this export encodes faster than a second of video a second. Cancel
+      // lands once the encoder is past the second Cluster.
+      await page.evaluate(() => ((window as unknown as PickerWindow).__writeDelayMs = 1000))
 
       await page.getByRole('button', { name: 'Export video' }).click()
       await page.getByRole('button', { name: /download webm/i }).first().click()
       await expect.poll(() => page.evaluate(() => (window as unknown as PickerWindow).__writes)).toBeGreaterThan(0)
+      // The progress line (the live region repeats it for screen readers).
+      await expect(page.getByText(/Encoding frame (6\d|[7-9]\d|1[0-3]\d)\//).first()).toBeVisible({ timeout: 60_000 })
       await page.getByRole('button', { name: 'Cancel', exact: true }).click()
 
       await expect(page.getByRole('heading', { name: 'Export Video' })).toBeHidden()
       // The file the picker made for this export is gone, not left half written.
       await expect.poll(() => readPrivateFile(page, EXPORT_NAME), { timeout: 15_000 }).toBeNull()
+      // Long enough for the writes pending at Cancel, a second each, to land.
+      await page.waitForTimeout(3000)
+      const rejections = await page.evaluate(() => (window as unknown as { __rejections: string[] }).__rejections)
+      expect(rejections, 'unhandled rejections').toEqual([])
+      expect(pageErrors, 'page errors').toEqual([])
     })
 
     test('a full disk stops the export and says so', async ({ page }) => {

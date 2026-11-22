@@ -438,8 +438,16 @@ export async function exportToMP4(
     // Create video encoder with error tracking
     let videoEncoderError: Error | null = null;
     const videoEncoder = new VideoEncoder({
+      // ESCSUITE-499: nobody awaits what an `output:` callback returns, so a
+      // packet the muxer refuses would reject into the page as an unhandled
+      // rejection. It becomes the track's error instead, which the frame loop
+      // and the pre-finalize check rethrow as the export's failure.
       output: async (chunk, meta) => {
-        await videoSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+        try {
+          await videoSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+        } catch (e) {
+          videoEncoderError ??= e instanceof Error ? e : new Error(String(e));
+        }
       },
       error: (e) => {
         console.error('Video encoder error:', e);
@@ -455,8 +463,13 @@ export async function exportToMP4(
     let audioEncoderError: Error | null = null;
     if (audioData && audioSource) {
       audioEncoder = new AudioEncoder({
+        // As the video track's (ESCSUITE-499).
         output: async (chunk, meta) => {
-          await audioSource!.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+          try {
+            await audioSource!.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+          } catch (e) {
+            audioEncoderError ??= e instanceof Error ? e : new Error(String(e));
+          }
         },
         error: (e) => {
           console.error('Audio encoder error:', e);
