@@ -73,9 +73,11 @@ checked before anything is awaited, and the download path adds no `await` in fro
   CRAFT, ESCSUITE-151), which only ever made a new file. Writing over the project's file could
   overwrite the one file that still holds those bytes, so an in-place Save refuses, naming each
   source: `Not saved: the media for "<name>" is no longer stored in this browser, so the project
-  file would lose it. The file was left as it was. Import the media again, or remove the clips
-  that use it, then save. Save Project As... can save a copy without it.` (a `ProjectFileError`
-  from `missingSourcesRefusal`, shown as the save's error). The download path is unchanged.
+  file would lose it. The file was left as it was. Remove the clips that use it, then save, or
+  use Save Project As... to save a copy without it.` (a `ProjectFileError` from
+  `missingSourcesRefusal`, shown as the save's error; several sources read "them"). It does not
+  say to import the media again: an import makes a new source with a new id, which the clips
+  that use the missing one do not pick up. The download path is unchanged.
 - **The check comes first** (ESCSUITE-497). An in-place Save calls `findMissingSources` (a used
   source with no stored bytes, by name, or one the library no longer lists, by id) before
   anything else, so a save that would refuse opens no permission prompt and touches no file.
@@ -87,11 +89,11 @@ checked before anything is awaited, and the download path adds no `await` in fro
   so nothing in it can be lost. They pass `{ leaveOutMissing: true }`: the file is written as the
   download writes it, without the sources that have no bytes, and the save says so instead of
   "Project saved successfully": `Project saved without the media for "<name>", which is no longer
-  stored in this browser. Import it again to put it back in the project.` This matches the
+  stored in this browser. The clips that use it stay in the project, without media.` This matches the
   download's behaviour before ESCSUITE-470 (which said nothing) rather than asking first with a
   confirm dialog: the picker is still reached before any `await`, and a cancelled picker still
   saves nothing. The new file becomes the project's, so the next Save writes in place and refuses
-  until the media is imported again or its clips are removed. Save & Load in the "unsaved work"
+  until its clips are removed. Save & Load in the "unsaved work"
   dialog leaves the source out the same way, without the notice, since the load's own notice
   follows at once.
 - **Save As** (File menu, only where the picker exists; no shortcut) always asks and makes the new

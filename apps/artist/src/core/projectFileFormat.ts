@@ -72,11 +72,15 @@ export class ProjectFileError extends Error {
  * quoted name. Save As makes a new file, which may leave it out (ESCSUITE-497).
  */
 export function missingSourcesRefusal(missing: string[]): ProjectFileError {
-  const what = missing.length === 1 ? `the media for ${missing[0]} is` : `the media for ${missing.join(', ')} are`;
+  const one = missing.length === 1;
+  const what = `the media for ${missing.join(', ')} ${one ? 'is' : 'are'}`;
+  const it = one ? 'it' : 'them';
+  // Not "import it again": an import makes a new source, which the clips
+  // that use this one do not pick up.
   return new ProjectFileError(
-    `Not saved: ${what} no longer stored in this browser, so the project file would lose it. ` +
-      'The file was left as it was. Import the media again, or remove the clips that use it, then save. ' +
-      'Save Project As... can save a copy without it.'
+    `Not saved: ${what} no longer stored in this browser, so the project file would lose ${it}. ` +
+      `The file was left as it was. Remove the clips that use ${it}, then save, ` +
+      `or use Save Project As... to save a copy without ${it}.`
   );
 }
 

@@ -3155,11 +3155,13 @@ describe('missingSourcesRefusal', () => {
   it('names one source, or several, and points at Save Project As...', () => {
     expect(missingSourcesRefusal(['"a.webm"']).message).toBe(
       'Not saved: the media for "a.webm" is no longer stored in this browser, so the project file would lose it. ' +
-        'The file was left as it was. Import the media again, or remove the clips that use it, then save. ' +
-        'Save Project As... can save a copy without it.'
+        'The file was left as it was. Remove the clips that use it, then save, ' +
+        'or use Save Project As... to save a copy without it.'
     )
-    expect(missingSourcesRefusal(['"a.webm"', '"b.mp4"']).message).toContain(
-      'Not saved: the media for "a.webm", "b.mp4" are no longer stored'
+    expect(missingSourcesRefusal(['"a.webm"', '"b.mp4"']).message).toBe(
+      'Not saved: the media for "a.webm", "b.mp4" are no longer stored in this browser, so the project file would lose them. ' +
+        'The file was left as it was. Remove the clips that use them, then save, ' +
+        'or use Save Project As... to save a copy without them.'
     )
     expect(missingSourcesRefusal(['"a"'])).toBeInstanceOf(ProjectFileError)
   })

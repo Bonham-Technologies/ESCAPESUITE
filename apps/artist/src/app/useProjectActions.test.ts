@@ -1021,11 +1021,11 @@ describe('saving to a file (ESCSUITE-470)', () => {
   describe('a source whose media is no longer stored (ESCSUITE-497)', () => {
     const refusal =
       'Not saved: the media for "take-1.webm" is no longer stored in this browser, so the project file would lose it. ' +
-      'The file was left as it was. Import the media again, or remove the clips that use it, then save. ' +
-      'Save Project As... can save a copy without it.'
+      'The file was left as it was. Remove the clips that use it, then save, ' +
+      'or use Save Project As... to save a copy without it.'
     const leftOutNotice =
       'Project saved without the media for "take-1.webm", which is no longer stored in this browser. ' +
-      'Import it again to put it back in the project.'
+      'The clips that use it stay in the project, without media.'
 
     it('an in-place Save checks first, and asks for nothing and writes nothing when it would refuse', async () => {
       const { result } = mountActions()
@@ -1097,7 +1097,7 @@ describe('saving to a file (ESCSUITE-470)', () => {
 
       expect(deps.showNotification).toHaveBeenCalledWith(
         'Project saved without the media for "a.webm", "b.mp4", which are no longer stored in this browser. ' +
-          'Import them again to put them back in the project.',
+          'The clips that use them stay in the project, without media.',
         'info'
       )
     })

@@ -95,13 +95,15 @@ export interface ProjectActions {
 
 /**
  * What a save that wrote a new file without some sources' media says
- * (ESCSUITE-497). `leftOut` holds each source's quoted name.
+ * (ESCSUITE-497). `leftOut` holds each source's quoted name. It does not say
+ * "import it again": an import makes a new source, which the clips that use
+ * the missing one do not pick up.
  */
 function leftOutNotice(leftOut: string[]): string {
   const one = leftOut.length === 1;
   return (
     `Project saved without the media for ${leftOut.join(', ')}, which ${one ? 'is' : 'are'} no longer stored in this browser. ` +
-    `Import ${one ? 'it' : 'them'} again to put ${one ? 'it' : 'them'} back in the project.`
+    `The clips that use ${one ? 'it' : 'them'} stay in the project, without media.`
   );
 }
 
