@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- ESCAPEARTIST: in Chrome and Edge, a project with a clip whose media is no longer stored in this browser can be saved again: the first Save and Save Project As write the new file without that media and name it in a notice, as the download always did, while a Save over the project's existing file still refuses before it asks for anything, so it no longer leaves an empty file behind; that refusal points you to a copy under a different name, and Save Project As then suggests the project's name plus " copy" (ESCSUITE-497).
 - ESCAPEARTIST: in Chrome and Edge, where the export dialog's buttons open a save dialog and write to the file you choose, they now read "Export WebM…", "Export MP4…" and "Export GIF…" instead of "Download …", for screen readers too; browsers that download the export keep "Download …" (ESCSUITE-498).
 - ESCAPEARTIST: Zoom to region and Crop on canvas close when you select another clip or deselect, so selecting the first clip again shows them closed instead of reopening the box and the form by themselves; selecting the same clip again keeps them open (ESCSUITE-500).
 - Tests: the e2e WebM reader now also reads frames stored in BlockGroups, where Mediabunny puts the last frame of each Cluster, so specs that count or check an ESCAPEARTIST export's or ESCAPECRAFT take's frames see every frame (150 of 150 in a five-second export, not 145) (ESCSUITE-494).
