@@ -52,8 +52,8 @@ checked before anything is awaited, and the download path adds no `await` in fro
   be waiting behind a slow write, and their writes then land on a closing stream ("Cannot write
   to a closing writable stream"). Both exporters' `output:` callbacks catch what the muxer's
   `add()` rejects with and keep it as the track's error (rethrown by the frame loop and the
-  pre-finalize check while the export runs, dropped once it has stopped), so nothing reaches the
-  page as an unhandled rejection. The e2e cancel case cancels while the muxer is waiting on a
+  checks before and after `finalize()` while the export runs, dropped once it has stopped), so
+  nothing reaches the page as an unhandled rejection. The e2e cancel case cancels while the muxer is waiting on a
   one-second write with packets queued behind it, and asserts no `unhandledrejection` and no
   `pageerror`.
 - **A failed write stops the export.** The first write the stream refuses is worded for the user

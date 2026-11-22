@@ -441,7 +441,7 @@ export async function exportToMP4(
       // ESCSUITE-499: nobody awaits what an `output:` callback returns, so a
       // packet the muxer refuses would reject into the page as an unhandled
       // rejection. It becomes the track's error instead, which the frame loop
-      // and the pre-finalize check rethrow as the export's failure.
+      // and the checks before and after finalize rethrow as the export's failure.
       output: async (chunk, meta) => {
         try {
           await videoSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
@@ -830,6 +830,22 @@ export async function exportToMP4(
     // an export the caller asked to stop. Thrown before the 'complete' report,
     // so the catch below does the cleanup and rethrows the abort as-is.
     checkAborted(signal);
+
+    // ESCSUITE-499: the check before the flush cannot see a packet the
+    // encoder delivers during it. A real encoder's flush() resolves without
+    // waiting for the `output:` callbacks, so those packets' `add()` calls can
+    // still be in the muxer at that point; `finalize()` queues behind them on
+    // the muxer's lock, so by now each has resolved or been caught above.
+    // Without this check a refused one would be dropped without a word and a
+    // file missing its last packets reported as complete.
+    if (videoEncoderError) {
+      log('error', `Video muxer error during finalize: ${(videoEncoderError as Error).message}`);
+      throw videoEncoderError;
+    }
+    if (audioEncoderError) {
+      log('error', `Audio muxer error during finalize: ${(audioEncoderError as Error).message}`);
+      throw audioEncoderError;
+    }
 
     // The finished file: committed to the picked file (ESCSUITE-470) before
     // the export says it is complete, so a write the disk refuses at the end

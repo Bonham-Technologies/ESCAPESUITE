@@ -241,8 +241,23 @@ test.describe('ESCSUITE-470: export and save to a file the user picks', () => {
       await page.getByRole('button', { name: 'Export video' }).click()
       await page.getByRole('button', { name: /download webm/i }).first().click()
       await expect.poll(() => page.evaluate(() => (window as unknown as PickerWindow).__writes)).toBeGreaterThan(0)
-      // The progress line (the live region repeats it for screen readers).
-      await expect(page.getByText(/Encoding frame (6\d|[7-9]\d|1[0-3]\d)\//).first()).toBeVisible({ timeout: 60_000 })
+      // Read the progress line on a short fixed interval: frames 60 to 150
+      // pass in under a second here, and the backoff of a `toBeVisible` retry
+      // (up to a second between tries) could miss them all and then wait on
+      // "Finalizing" until it timed out. A finalize reached all the same (a
+      // much faster machine) lets the cancel land there: the case then passes
+      // without the race, rather than failing for a reason that is not a bug.
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() => {
+              const text = document.body.innerText
+              if (text.includes('Finalizing WebM')) return Number.MAX_SAFE_INTEGER
+              return Number(/Encoding frame (\d+)\//.exec(text)?.[1] ?? 0)
+            }),
+          { intervals: [50], timeout: 60_000 }
+        )
+        .toBeGreaterThanOrEqual(60)
       await page.getByRole('button', { name: 'Cancel', exact: true }).click()
 
       await expect(page.getByRole('heading', { name: 'Export Video' })).toBeHidden()

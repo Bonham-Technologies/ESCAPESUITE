@@ -149,7 +149,13 @@ Nobody awaits what a `VideoEncoder`/`AudioEncoder` `output:` callback returns, s
 the muxer (ESCSUITE-159) stops new packets but not the ones already handed over: behind a slow
 picked file their writes are still pending when `cancel()` closes the stream. Each callback now
 catches the rejection into `videoEncoderError`/`audioEncoderError` (first one wins), which the
-frame loop and the pre-finalize check rethrow; after a cancel nothing reads it. `exportMP4.ts`
+frame loop and the pre-finalize check rethrow; after a cancel nothing reads it. A last check
+after `finalize()` catches a packet the encoder delivered during the flush: a real encoder's
+`flush()` does not wait for its callbacks, so that packet's `add()` can still be in the muxer at
+the pre-finalize check, and `finalize()` queues behind it on the muxer's lock. Without that
+check its refusal would be dropped silently and a file missing its last packets reported as
+complete. `exportMP4.ts`
 does the same, though it never cancels its Output and so has no closing-stream case. Tests:
 `exportWebM.test.ts` ("drops a packet whose write was still in flight at Cancel", using the
-mediabunny double's `addGate`) and the refusal cases in both exporters' tests (`addError`).
+mediabunny double's `addGate`) and the refusal cases in both exporters' tests (`addError`, held
+past the pre-finalize check by `addGate` for the flush case).

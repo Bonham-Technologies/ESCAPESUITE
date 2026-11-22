@@ -148,7 +148,6 @@ export class PacketSourceDouble {
       state.lateAdds += 1
       throw new Error('Output has been canceled.')
     }
-    if (state.addError && (state.addErrorKind ?? this.kind) === this.kind) throw state.addError
     if (state.addGate) {
       await state.addGate
       // Mediabunny's StreamTarget writing into a writer `cancel()` is closing.
@@ -157,6 +156,8 @@ export class PacketSourceDouble {
         throw new TypeError('Cannot write to a closing writable stream')
       }
     }
+    // After the gate, so a held add can be refused once it resumes.
+    if (state.addError && (state.addErrorKind ?? this.kind) === this.kind) throw state.addError
     this.packets.push({ packet, meta })
   })
 
