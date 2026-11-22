@@ -258,7 +258,8 @@ export function useClipEditorActions(): ClipEditorActions {
   const setKeyframePanelOpen = useEditorStore((state) => state.setKeyframePanelOpen);
   const keyframePanelOpen = useEditorStore((state) => state.keyframePanelState.isOpen);
   // `cropClipId` is a scalar that changes only when the toggle below is
-  // pressed, so it cannot move a playback-tick render count — see constraint 5
+  // pressed or the selection moves off its clip (ESCSUITE-500), never on a
+  // playback tick, so it cannot move a playback-tick render count — see constraint 5
   // and `ClipEditor.rerender.test.tsx`.
   const cropClipId = useEditorStore((state) => state.cropClipId);
   const setCropClipId = useEditorStore((state) => state.setCropClipId);

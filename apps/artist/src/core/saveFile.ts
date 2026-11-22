@@ -36,6 +36,22 @@ export function canPickSaveFile(): boolean {
   return typeof (window as unknown as Partial<WindowWithSaveFilePicker>).showSaveFilePicker === 'function';
 }
 
+/**
+ * Whether a save picker this page opens would show (ESCSUITE-498): the browser
+ * has one, and the page is the top-level page or from the same origin as it.
+ * Chromium refuses the picker in a frame from another origin (`SecurityError`),
+ * and the save then downloads. The export buttons say Export or Download by it.
+ */
+export function mayPickSaveFile(): boolean {
+  if (!canPickSaveFile()) return false;
+  try {
+    return window.top === window || window.top?.location.origin === window.location.origin;
+  } catch {
+    // Reading another origin's location throws: a cross-origin frame.
+    return false;
+  }
+}
+
 /** Where a save goes: a picked file, the download it always was, or nowhere (the user cancelled). */
 export type SaveDestination =
   | { kind: 'file'; handle: FileSystemFileHandle }

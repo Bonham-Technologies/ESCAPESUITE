@@ -27,6 +27,23 @@ export const ARTIST_FIXTURE_MP4 = resolvePath(
   '../fixtures/headless/source.mp4'
 )
 
+const EXPORT_FORMAT_LABELS = { webm: 'WebM', mp4: 'MP4', gif: 'GIF' } as const
+
+/**
+ * The accessible name of the export dialog's WebM, MP4 or GIF button
+ * (ESCSUITE-498), in either of its wordings: "Download WebM" where the export
+ * downloads (Firefox, Safari, and the e2e configs' Chromium, which launches
+ * without a save picker: `utils/filePickers.ts`), "Export WebM…" where a click
+ * opens the save picker (Chromium with the picker, as the ESCSUITE-470 spec's
+ * stand-in gives it). Leave out `format` to match any of the three.
+ *
+ * A spec that means one wording asserts it with the plain string instead.
+ */
+export function exportButtonName(format?: keyof typeof EXPORT_FORMAT_LABELS): RegExp {
+  const label = format ? EXPORT_FORMAT_LABELS[format] : `(?:${Object.values(EXPORT_FORMAT_LABELS).join('|')})`
+  return new RegExp(`^(?:Download ${label}|Export ${label}…)$`)
+}
+
 /**
  * Put one clip on the ESCAPEARTIST timeline.
  *

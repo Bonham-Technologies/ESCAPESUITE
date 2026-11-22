@@ -185,13 +185,23 @@ into a YouTube chapter list: **Copy chapters** (clipboard) and **Download chapte
   Intro). The row shows when a marker falls in either range; when the picked one has none, both
   buttons are disabled and point (`aria-describedby`) at a "No markers in the section." line.
 - **Format.** One `M:SS Title` line per chapter; every line is `H:MM:SS` when the range is an hour or
-  longer. An unlabelled marker is `Chapter N` (its place among the in-range markers); whitespace in a
-  label collapses to one line.
+  longer. Times are whole seconds, rounded down. An unlabelled marker is `Chapter N` (its place among
+  the in-range markers); whitespace in a label collapses to one line.
+- **Same second (ESCSUITE-496).** Markers whose times round down to the same whole second (10.2 s and
+  10.9 s are both 0:10) make **one** chapter line, titled by the earliest of them; the others are
+  dropped from the list, with no warning (their `Chapter N` numbers still count them). Two lines with
+  one time would not be ascending, and YouTube would ignore the list.
+- **A label that starts with a time (ESCSUITE-496).** A label beginning with `M:SS` or `H:MM:SS`
+  (`2:30 recap`, `12:00pm lunch`) is written after `- ` (`0:15 - 2:30 recap`), so YouTube does not
+  read it as the line's timestamp. Only the line changes: the chapter's title, and the warnings that
+  name it, keep the label as written. A time later in a label (`Part 2:30`) is left alone. Titles
+  are not shortened.
 - **Warnings, never blocking.** Shown as `role="status"` notices naming the rule: fewer than three
-  chapters, and any chapter (the last one runs to the end of the range) under ten seconds. First
-  timestamp 0:00 and ascending order hold by construction. Copy reports "Chapters copied" through a
+  chapters, and any chapter (the last one runs to the end of the range) under ten seconds. A first
+  timestamp of 0:00 and strictly ascending times hold by construction (the Intro line, and the
+  same-second merge above). Copy reports "Chapters copied" through a
   polite live region (or "Could not copy chapters" when the clipboard refuses).
 - **No markers at all: no row** (rather than a hint; simpler, and the Markers feature is its own
   discovery). Tests: `utils/youtubeChapters.test.ts`, `components/Export/ExportDialog.chapters.test.tsx`,
-  and the e2e `tests/regressions/ESCSUITE-472.spec.ts`.
+  and the e2e `tests/regressions/ESCSUITE-472.spec.ts` (which also covers the ESCSUITE-496 cases).
 - **Out of scope:** chapters embedded in the MP4/WebM, and any upload.

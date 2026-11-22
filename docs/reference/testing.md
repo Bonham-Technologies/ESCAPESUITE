@@ -12,7 +12,10 @@
   export or save. Every e2e config launches Chromium with
   `--disable-blink-features=FileSystemAccessLocal` (`apps/e2e/utils/filePickers.ts`), so specs that
   wait for a download keep getting one; `tests/regressions/ESCSUITE-470.spec.ts` stubs the pickers
-  with origin-private file system handles to test the picked-file path.
+  with origin-private file system handles to test the picked-file path. With a picker, ARTIST's
+  export buttons read "Export WebM…" rather than "Download WebM" (ESCSUITE-498), so specs select
+  them with `exportButtonName('webm' | 'mp4' | 'gif')` from `apps/e2e/utils/artist.ts`, which
+  matches either wording.
 - **E2E retries** (ESCSUITE-352): CI retries a failing test twice, except in the `chromium-strict`
   project, which runs `tests/journeys/**/*.spec.ts`, the ARTIST soaks
   (`tests/escapeartist/*soak.spec.ts`: `soak` and `import-soak`) and

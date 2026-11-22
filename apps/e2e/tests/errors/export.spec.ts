@@ -10,6 +10,7 @@ import {
   seedTextClip,
   openExportDialog,
   openExportAdvancedOptions,
+  exportButtonName,
 } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
@@ -50,7 +51,7 @@ test.describe('Export Cancellation', () => {
     await seedTextClip(page)
     await openExportDialog(page)
 
-    await page.getByRole('button', { name: 'Download WebM' }).first().click()
+    await page.getByRole('button', { name: exportButtonName('webm') }).first().click()
 
     // Encoding reports live progress; cancelling mid-encode has to tear the
     // export down and hand the editor back.
@@ -107,7 +108,7 @@ test.describe('WebCodecs Unavailable', () => {
       'aria-expanded',
       'false'
     )
-    await expect(page.getByRole('button', { name: 'Download WebM' }).first()).toBeDisabled()
+    await expect(page.getByRole('button', { name: exportButtonName('webm') }).first()).toBeDisabled()
 
     // And the sentence is true: under Advanced, GIF is the one format left enabled.
     await page.getByRole('button', { name: 'Advanced options' }).click()
@@ -135,7 +136,7 @@ test.describe('Codec Not Supported', () => {
     await seedTextClip(page)
     await openExportDialog(page)
 
-    await expect(page.getByRole('button', { name: 'Download WebM' }).first()).toBeDisabled()
+    await expect(page.getByRole('button', { name: exportButtonName('webm') }).first()).toBeDisabled()
     await expect(page.getByRole('alert')).toHaveText(
       'This browser cannot encode WebM video or MP4 video — Chrome or Edge can. ' +
         'GIF export needs no WebCodecs — choose GIF under Advanced options to export anyway.'
@@ -161,7 +162,7 @@ test.describe('Export Failure Recovery', () => {
     await seedTextClip(page)
     await openExportDialog(page)
 
-    await page.getByRole('button', { name: 'Download WebM' }).first().click()
+    await page.getByRole('button', { name: exportButtonName('webm') }).first().click()
 
     const alert = page.getByRole('alert')
     await expect(alert).toBeVisible({ timeout: 30_000 })
@@ -172,7 +173,7 @@ test.describe('Export Failure Recovery', () => {
     await seedTextClip(page)
     await openExportDialog(page)
 
-    const startExport = page.getByRole('button', { name: 'Download WebM' }).first()
+    const startExport = page.getByRole('button', { name: exportButtonName('webm') }).first()
     await startExport.click()
 
     // The failed encode leaves the dialog on its idle controls rather than a
@@ -311,7 +312,7 @@ test.describe('Background Tab Export', () => {
     await openExportAdvancedOptions(page)
     await page.getByRole('radio', { name: /MP4/ }).check()
 
-    await page.getByRole('button', { name: 'Download MP4' }).first().click()
+    await page.getByRole('button', { name: exportButtonName('mp4') }).first().click()
     // `.first()` since ESCSUITE-215: the progress view's live region carries
     // the same words a second time, for ears rather than eyes.
     await expect(page.getByText(/Encoding frame \d+\/\d+/).first()).toBeVisible({ timeout: 30_000 })

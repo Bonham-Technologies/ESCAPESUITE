@@ -8,6 +8,16 @@ checked before anything is awaited, and the download path adds no `await` in fro
 
 ## Export
 
+- **The buttons say Export** (ESCSUITE-498). Where a click opens the picker (`mayPickSaveFile`:
+  the browser has `showSaveFilePicker` and the page is the top-level page or from the same origin
+  as it, since Chromium refuses the picker in a cross-origin frame and the export then downloads),
+  the dialog's buttons read "Export WebM…", "Export MP4…" and "Export GIF…", the ellipsis saying a
+  dialog follows; everywhere else they keep "Download WebM", "Download MP4" and "Download GIF". The
+  accessible name is the text. The e2e specs select them with `exportButtonName(format)` from
+  `apps/e2e/utils/artist.ts`, which matches either wording (e2e Chromium has no picker, so they
+  read Download there); the ESCSUITE-470 spec asserts "Export WebM…" with its stand-in picker and
+  "Download WebM" without one. `handleExport` asks for the picker by the same `mayPickSaveFile`,
+  so the words and the click always agree: in a cross-origin frame it downloads without trying.
 - **The picker comes first.** `handleExport` works out the format and the file name
   (`<project>.<format>`) and calls `chooseSaveDestination` before any `await`, because the picker
   needs the click's user activation and an earlier `await` can spend it. The picker's type list
@@ -77,16 +87,43 @@ checked before anything is awaited, and the download path adds no `await` in fro
   read-only until `mayWrite` asks for `readwrite` access, also before any `await`; refused, the
   save says `Not saved: permission to write to "<name>" was not given. Use Save Project As... to
   choose a file.`
-- **Never a project file with a source left out.** The download has always skipped a used source
-  whose bytes are no longer in IndexedDB (ESCSUITE-330's missing source, a take deleted in CRAFT,
-  ESCSUITE-151), which only ever made a new file. Writing to a handle could overwrite the one file
-  that still holds those bytes, so `saveProjectToFile` refuses before it opens the file, naming
-  each source: `Not saved: the media for "<name>" is no longer stored in this browser, so the
-  project file would lose it. The file was left as it was. Import the media again, or remove the
-  clips that use it, then save.` (a `ProjectFileError`, shown as the save's error). The download
-  path is unchanged.
+- **Never over a project file with a source left out.** The download has always skipped a used
+  source whose bytes are no longer in IndexedDB (ESCSUITE-330's missing source, a take deleted in
+  CRAFT, ESCSUITE-151), which only ever made a new file. Writing over the project's file could
+  overwrite the one file that still holds those bytes, so an in-place Save refuses, naming each
+  source: `Not saved: the media for "<name>" is no longer stored in this browser, so the project
+  file would lose it. The file was left as it was. Remove the clips that use it, then save. Or
+  use Save Project As... to save a copy under a different name: replacing this file would lose
+  that media.` (a `ProjectFileError` from `missingSourcesRefusal`, shown as the save's error;
+  several sources read "them"). It warns against replacing the file because Chromium's picker
+  empties a file it is pointed at before anything is written, and the copy is then written
+  without the missing media, so picking the project's own file in Save As would lose the media
+  only it may hold. It does not
+  say to import the media again: an import makes a new source with a new id, which the clips
+  that use the missing one do not pick up. The download path is unchanged.
+- **The check comes first** (ESCSUITE-497). An in-place Save calls `findMissingSources` (a used
+  source with no stored bytes, by name, or one the library no longer lists, by id) before
+  anything else, so a save that would refuse opens no permission prompt and touches no file.
+  `saveProjectToFile` checks again as it builds the file and still refuses a source that went in
+  the meantime. The check is one IndexedDB read per used source; `mayWrite`'s prompt follows it
+  within the click's activation window (Chromium's lasts five seconds and a read does not use it).
+- **A new file may leave a source out** (ESCSUITE-497). The first Save and Save As write to a file
+  the picker has just made (Chromium's picker empties a file that already existed as it is picked),
+  so nothing in it can be lost. They pass `{ leaveOutMissing: true }`: the file is written as the
+  download writes it, without the sources that have no bytes, and the save says so instead of
+  "Project saved successfully": `Project saved without the media for "<name>", which is no longer
+  stored in this browser. The clips that use it stay in the project, without media.` This matches the
+  download's behaviour before ESCSUITE-470 (which said nothing) rather than asking first with a
+  confirm dialog: the picker is still reached before any `await`, and a cancelled picker still
+  saves nothing. The new file becomes the project's, so the next Save writes in place and refuses
+  until its clips are removed. Save & Load in the "unsaved work"
+  dialog leaves the source out the same way, without the notice, since the load's own notice
+  follows at once.
 - **Save As** (File menu, only where the picker exists; no shortcut) always asks and makes the new
-  file the project's. New Project forgets the file, and so does opening a file that arrived any
+  file the project's. When the project already has a file, it suggests `<project name> copy.veditor`
+  rather than `<project name>.veditor`, so the picker's default answer is not the project's own file
+  (ESCSUITE-497); with no file yet it suggests `<project name>.veditor`, as the first Save does. The
+  name is known before the picker opens, so nothing is awaited first. New Project forgets the file, and so does opening a file that arrived any
   other way (a drop, the `<input>` fallback) and a host's `LOAD_PROJECT` (`App` wraps the
   `setProject` it hands `useHostIntegration` with `forgetProjectFile`), so the next Save asks.
 - **One save at a time.** `save` ignores a second Save, Save As or Ctrl+S while one is running (a
@@ -101,7 +138,9 @@ checked before anything is awaited, and the download path adds no `await` in fro
 - Unit: `core/saveFile.test.ts` (the sink, against `test/doubles/fileHandle.ts`, an in-memory
   handle with Chromium's commit-on-close rule; it pins that the sink builds no Blob),
   `components/Export/ExportDialog.saveFile.test.tsx`, the ESCSUITE-470 block in
-  `app/useProjectActions.test.ts`, and a sink case in each exporter's suite.
+  `app/useProjectActions.test.ts` (with its ESCSUITE-497 cases), the `saveProjectToFile`,
+  `findMissingSources` and `missingSourcesRefusal` cases in `core/projectManager.test.ts`, and a
+  sink case in each exporter's suite.
 - E2E: headless Chromium has no dialog to show, so its `showSaveFilePicker` rejects at once with
   `AbortError`; every e2e config launches Chromium with `--disable-blink-features=FileSystemAccessLocal`
   (`apps/e2e/utils/filePickers.ts`) so the existing specs keep downloading.
@@ -111,6 +150,9 @@ checked before anything is awaited, and the download path adds no `await` in fro
   5-second text clip, by counting every Blob the page constructs during the export): the 19,014
   byte WebM was written to the file and the page built no Blob at all (largest: 0 bytes); the
   download path builds one Blob the size of the output.
+  `apps/e2e/tests/regressions/ESCSUITE-497.spec.ts` deletes a clip's stored bytes, then checks
+  that the first Save writes a project file and names the source, and that the Save after it
+  refuses, opens no picker and leaves that file's bytes as they were.
 
 Out of scope: Firefox and Safari (no save picker), the `.veditor` format, the three-hour export
 limit.

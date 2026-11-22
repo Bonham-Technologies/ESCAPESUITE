@@ -29,9 +29,22 @@ export function formatChapterTime(seconds: number, withHours: boolean): string {
 }
 
 /**
+ * A label YouTube could read as a timestamp of its own: one that starts with
+ * `M:SS` or `H:MM:SS` (ESCSUITE-496).
+ */
+const LEADING_TIMESTAMP = /^\d+:\d{2}(?::\d{2})?(?!\d)/;
+
+/** The title as written on a chapter line: a `- ` keeps a leading time apart from the chapter's own. */
+function lineTitle(title: string): string {
+  return LEADING_TIMESTAMP.test(title) ? `- ${title}` : title;
+}
+
+/**
  * The timeline markers as a YouTube chapter list for the exported `range`.
  * Markers outside `[start, end)` are dropped and the rest are offset to the
  * range's start; an "Intro" at 0:00 is added when the first one is later.
+ * Markers that fall in the same whole second make one chapter, titled by the
+ * first of them, so the times are strictly ascending (ESCSUITE-496).
  * Every line uses `H:MM:SS` when the range is an hour or longer, else `M:SS`.
  */
 export function buildYoutubeChapters(markers: readonly Marker[], range: { start: number; end: number }): YoutubeChapters {
@@ -43,11 +56,12 @@ export function buildYoutubeChapters(markers: readonly Marker[], range: { start:
     .map((m, i) => ({
       time: Math.floor(m.time - range.start),
       title: m.label.replace(/\s+/g, ' ').trim() || `Chapter ${i + 1}`,
-    }));
+    }))
+    .filter((c, i, all) => i === 0 || c.time !== all[i - 1].time);
   if (kept.length === 0) return { chapters: [], text: '', warnings: [] };
 
   const chapters: YoutubeChapter[] = kept[0].time > 0 ? [{ time: 0, title: 'Intro' }, ...kept] : kept;
-  const text = chapters.map((c) => `${formatChapterTime(c.time, withHours)} ${c.title}`).join('\n');
+  const text = chapters.map((c) => `${formatChapterTime(c.time, withHours)} ${lineTitle(c.title)}`).join('\n');
 
   const warnings: string[] = [];
   if (chapters.length < MIN_CHAPTERS) {

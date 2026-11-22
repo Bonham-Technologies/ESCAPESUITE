@@ -86,9 +86,11 @@ export const CROP_HANDLE_MODES: Record<CropHandle, DragMode> = {
 /**
  * Is crop mode on, and on what — leaving the playhead out of it?
  *
- * `cropClipId` is a latch that nothing clears, so the second condition is what
- * makes a selection change — or a delete, a project load, an undo — leave crop
- * mode: a latch that no longer names the selected clip is inert.
+ * `cropClipId` is a latch, and the second condition is what makes a selection
+ * change — or a delete, a project load, an undo — leave crop mode: a latch that
+ * no longer names the selected clip is inert. (The store also clears it when
+ * the selection moves off its clip, ESCSUITE-500's `store/toolLatches.ts`, so
+ * reselecting the clip does not reopen crop mode.)
  *
  * An overlay needs no condition of its own: it carries `sourceVideoId: ''` and
  * fails the source lookup.

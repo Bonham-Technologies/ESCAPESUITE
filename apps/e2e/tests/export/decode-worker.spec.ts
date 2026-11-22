@@ -8,6 +8,7 @@ import {
   importMediaAndAddToTimeline,
   openExportAdvancedOptions,
   openExportDialog,
+  exportButtonName,
 } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 import { installResourceProbe, readLiveCounts } from '../../utils/resourceProbe'
@@ -225,7 +226,7 @@ async function exportMp4FromDialog(page: Page, resolution: 'project' | '480p'): 
     .selectOption(resolution)
 
   const downloadPromise = page.waitForEvent('download', { timeout: 120_000 })
-  await page.getByRole('button', { name: 'Download MP4' }).first().click()
+  await page.getByRole('button', { name: exportButtonName('mp4') }).first().click()
   return readFileSync(await (await downloadPromise).path())
 }
 

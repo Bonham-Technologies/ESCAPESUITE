@@ -47,7 +47,7 @@ import { getSetting, setSetting } from '../../core/storage';
 import { analytics } from '../../utils/analytics';
 import { sendMessage } from '../../utils/integration';
 import { downloadBlob } from '../../utils/downloadBlob';
-import { FileWriteError, canPickSaveFile, chooseSaveDestination, errorMessage, openFileSink } from '../../core/saveFile';
+import { FileWriteError, chooseSaveDestination, errorMessage, mayPickSaveFile, openFileSink } from '../../core/saveFile';
 import type { FileSink, SaveDestination, SaveFileType } from '../../core/saveFile';
 import { serializeCaptions } from '../../core/captions';
 import { buildYoutubeChapters } from '../../utils/youtubeChapters';
@@ -140,6 +140,16 @@ function lengthNoticeText(reason: string): string {
   return reason === EXPORT_TOO_LONG_REASON ? `${reason}. ${SECTION_KEYS_HINT}` : `${reason}.`;
 }
 
+/**
+ * The words on an export button (ESCSUITE-498): "Export WebM…" where a click
+ * opens the save picker (`mayPickSaveFile`), whose ellipsis says a dialog
+ * follows; "Download WebM" where the export downloads. Its accessible name is
+ * the same words.
+ */
+function exportButtonLabel(format: 'WebM' | 'MP4' | 'GIF', pickerMayOpen: boolean): string {
+  return pickerMayOpen ? `Export ${format}…` : `Download ${format}`;
+}
+
 interface ExportDialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -165,6 +175,9 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   const inPoint = useEditorStore((state) => state.inPoint);
   const outPoint = useEditorStore((state) => state.outPoint);
   const markers = useEditorStore((state) => state.markers);
+  // ESCSUITE-498: the export buttons say Export where a click opens the save
+  // picker, Download where it downloads.
+  const pickerMayOpen = mayPickSaveFile();
 
   // Use prop timeRange if provided, otherwise derive from in/out points.
   // Memoised so handleExport, which lists it as a dependency, is not rebuilt
@@ -534,8 +547,11 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     // from the click itself: nothing above awaits, and the picker needs the
     // gesture's activation. A cancelled picker starts nothing. Elsewhere the
     // export downloads, as it always has, with no `await` added in front.
+    // ESCSUITE-498: decided by the same `mayPickSaveFile` as the button's
+    // words, so a button that says Export opens the picker and one that says
+    // Download downloads (a cross-origin frame goes straight to the download).
     let destination: SaveDestination = { kind: 'download' };
-    if (canPickSaveFile()) {
+    if (mayPickSaveFile()) {
       try {
         destination = await chooseSaveDestination(fileName, EXPORT_FILE_TYPES[format]);
       } catch (pickError) {
@@ -1014,7 +1030,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                     title={lengthReason ?? webmBlockedReason ?? undefined}
                     aria-describedby={lengthReason !== null ? LENGTH_REASON_ID : undefined}
                   >
-                    Download WebM
+                    {exportButtonLabel('WebM', pickerMayOpen)}
                   </button>
                 )}
               </div>
@@ -1317,7 +1333,10 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                       title={advancedBlockedReason ?? undefined}
                       aria-describedby={lengthReason !== null ? LENGTH_REASON_ID : undefined}
                     >
-                      Download {effectiveAdvancedFormat === 'gif' ? 'GIF' : effectiveAdvancedFormat === 'mp4' ? 'MP4' : 'WebM'}
+                      {exportButtonLabel(
+                        effectiveAdvancedFormat === 'gif' ? 'GIF' : effectiveAdvancedFormat === 'mp4' ? 'MP4' : 'WebM',
+                        pickerMayOpen
+                      )}
                     </button>
                   </div>
                 )}

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test, expect, type BrowserContext, type Page } from '@playwright/test'
-import { importMediaAndAddToTimeline, openExportDialog } from '../../utils/artist'
+import { importMediaAndAddToTimeline, openExportDialog, exportButtonName } from '../../utils/artist'
 import { grantMediaPermissions, mockSyntheticMedia } from '../../utils/media-mocks'
 import { waitForAppReady } from '../../utils/ready'
 
@@ -117,7 +117,7 @@ test.describe('Hosted apps work offline after the first visit (ESCSUITE-469)', (
     await importMediaAndAddToTimeline(page, WEBM_FIXTURE)
     await openExportDialog(page)
     const downloadPromise = page.waitForEvent('download', { timeout: 150_000 })
-    await page.getByRole('button', { name: 'Download WebM' }).first().click()
+    await page.getByRole('button', { name: exportButtonName('webm') }).first().click()
     const download = await downloadPromise
     expect(download.suggestedFilename()).toMatch(/\.webm$/)
     expect(statSync(await download.path()).size).toBeGreaterThan(1000)

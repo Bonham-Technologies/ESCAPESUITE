@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 import { useProjectActions, type ProjectActionsDeps } from './useProjectActions'
 import * as confirmModule from './confirmAction'
-import { loadProject, saveProject, saveProjectToFile, showOpenProjectDialog } from '../core/projectManager'
+import { findMissingSources, loadProject, saveProject, saveProjectToFile, showOpenProjectDialog } from '../core/projectManager'
 import { rememberFileHandle } from '../core/saveFile'
 import { domError, fakeFileHandle, installSavePicker } from '../test/doubles/fileHandle'
 import { ProjectFileError } from '../core/projectFileFormat'
@@ -820,12 +820,15 @@ describe('the editor block (ESCSUITE-245)', () => {
 // downloading another copy.
 describe('saving to a file (ESCSUITE-470)', () => {
   const editor = { inPoint: null, outPoint: null, markers: [] }
+  // ESCSUITE-497: a file the picker just made has nothing to lose.
+  const newFile = { leaveOutMissing: true }
   let uninstall: () => void
   let picked: ReturnType<typeof fakeFileHandle>
   const picker = () => (window as unknown as { showSaveFilePicker: ReturnType<typeof vi.fn> }).showSaveFilePicker
 
   beforeEach(() => {
-    vi.mocked(saveProjectToFile).mockResolvedValue(undefined)
+    vi.mocked(saveProjectToFile).mockResolvedValue([])
+    vi.mocked(findMissingSources).mockResolvedValue([])
     vi.mocked(loadProject).mockResolvedValue({ project: { ...deps.project, name: 'Opened' }, sourceVideos: [] })
     picked = fakeFileHandle('Untitled Project.veditor')
     uninstall = installSavePicker(async () => picked.handle)
@@ -858,7 +861,7 @@ describe('saving to a file (ESCSUITE-470)', () => {
       suggestedName: 'Untitled Project.veditor',
       types: [expect.objectContaining({ accept: { 'application/octet-stream': ['.veditor'] } })],
     })
-    expect(saveProjectToFile).toHaveBeenCalledWith(picked.handle, deps.project, deps.sourceVideos, undefined, editor)
+    expect(saveProjectToFile).toHaveBeenCalledWith(picked.handle, deps.project, deps.sourceVideos, undefined, editor, newFile)
     expect(saveProject).not.toHaveBeenCalled()
     expect(deps.showNotification).toHaveBeenCalledWith('Project saved successfully', 'success')
 
@@ -898,11 +901,27 @@ describe('saving to a file (ESCSUITE-470)', () => {
 
     await save(result, true)
     expect(picker()).toHaveBeenCalledTimes(1)
-    expect(saveProjectToFile).toHaveBeenLastCalledWith(picked.handle, deps.project, deps.sourceVideos, undefined, editor)
+    expect(saveProjectToFile).toHaveBeenLastCalledWith(picked.handle, deps.project, deps.sourceVideos, undefined, editor, newFile)
 
     await save(result)
     expect(picker()).toHaveBeenCalledTimes(1)
     expect(saveProjectToFile).toHaveBeenLastCalledWith(picked.handle, deps.project, deps.sourceVideos, undefined, editor)
+  })
+
+  // ESCSUITE-497: the picker's default answer to Save As must not be the
+  // project's own file, which replacing would empty.
+  it('Save As from a project with a file suggests a copy\'s name; with none, the project\'s name', async () => {
+    const { result } = mountActions()
+
+    await save(result, true)
+    expect(picker()).toHaveBeenLastCalledWith(expect.objectContaining({ suggestedName: 'Untitled Project.veditor' }))
+
+    await save(result, true)
+    expect(picker()).toHaveBeenLastCalledWith(expect.objectContaining({ suggestedName: 'Untitled Project copy.veditor' }))
+
+    await openThroughPicker(result)
+    await save(result, true)
+    expect(picker()).toHaveBeenLastCalledWith(expect.objectContaining({ suggestedName: 'Untitled Project copy.veditor' }))
   })
 
   it('forgets the file on New Project, and on opening a file that came another way', async () => {
@@ -1010,7 +1029,103 @@ describe('saving to a file (ESCSUITE-470)', () => {
     await act(async () => {
       await result.current.handleProjectLoadSaveAndLoad()
     })
-    expect(saveProjectToFile).toHaveBeenCalledWith(picked.handle, deps.project, deps.sourceVideos, undefined, editor)
+    expect(saveProjectToFile).toHaveBeenCalledWith(picked.handle, deps.project, deps.sourceVideos, undefined, editor, newFile)
     expect(loadProject).toHaveBeenCalled()
+  })
+
+  // ESCSUITE-497: a used source with no stored bytes.
+  describe('a source whose media is no longer stored (ESCSUITE-497)', () => {
+    const refusal =
+      'Not saved: the media for "take-1.webm" is no longer stored in this browser, so the project file would lose it. ' +
+      'The file was left as it was. Remove the clips that use it, then save. ' +
+      'Or use Save Project As... to save a copy under a different name: replacing this file would lose that media.'
+    const leftOutNotice =
+      'Project saved without the media for "take-1.webm", which is no longer stored in this browser. ' +
+      'The clips that use it stay in the project, without media.'
+
+    it('an in-place Save checks first, and asks for nothing and writes nothing when it would refuse', async () => {
+      const { result } = mountActions()
+      const opened = await openThroughPicker(result)
+      vi.mocked(findMissingSources).mockResolvedValue(['"take-1.webm"'])
+
+      await save(result)
+
+      expect(findMissingSources).toHaveBeenCalledWith(deps.project, deps.sourceVideos)
+      // No permission prompt, no picker, no write.
+      expect(opened.requestPermission).not.toHaveBeenCalled()
+      expect(picker()).not.toHaveBeenCalled()
+      expect(saveProjectToFile).not.toHaveBeenCalled()
+      expect(opened.streams).toHaveLength(0)
+      expect(deps.showNotification).toHaveBeenCalledWith(refusal, 'error')
+      expect(deps.showNotification).not.toHaveBeenCalledWith('Project saved successfully', 'success')
+      expect(result.current.isSaving).toBe(false)
+    })
+
+    it('an in-place Save with every source stored checks before it asks for write access', async () => {
+      const { result } = mountActions()
+      const opened = await openThroughPicker(result)
+
+      await save(result)
+
+      expect(vi.mocked(findMissingSources).mock.invocationCallOrder[0]).toBeLessThan(
+        opened.requestPermission.mock.invocationCallOrder[0]
+      )
+      expect(saveProjectToFile).toHaveBeenCalledWith(opened.handle, deps.project, deps.sourceVideos, undefined, editor)
+    })
+
+    it('the first Save still saves, to a new file without that media, and says which', async () => {
+      vi.mocked(saveProjectToFile).mockResolvedValue(['"take-1.webm"'])
+      const { result } = mountActions()
+
+      await save(result)
+
+      expect(picker()).toHaveBeenCalledTimes(1)
+      expect(saveProjectToFile).toHaveBeenCalledWith(picked.handle, deps.project, deps.sourceVideos, undefined, editor, newFile)
+      expect(deps.showNotification).toHaveBeenCalledWith(leftOutNotice, 'info')
+      expect(deps.showNotification).not.toHaveBeenCalledWith('Project saved successfully', 'success')
+
+      // The next Save writes in place, so it refuses rather than write again.
+      vi.mocked(findMissingSources).mockResolvedValue(['"take-1.webm"'])
+      await save(result)
+      expect(saveProjectToFile).toHaveBeenCalledTimes(1)
+      expect(deps.showNotification).toHaveBeenLastCalledWith(refusal, 'error')
+    })
+
+    it('Save As over an opened file saves a new file without that media', async () => {
+      const { result } = mountActions()
+      const opened = await openThroughPicker(result)
+      vi.mocked(findMissingSources).mockResolvedValue(['"take-1.webm"'])
+      vi.mocked(saveProjectToFile).mockResolvedValue(['"take-1.webm"'])
+
+      await save(result, true)
+
+      expect(saveProjectToFile).toHaveBeenCalledTimes(1)
+      expect(saveProjectToFile).toHaveBeenCalledWith(picked.handle, deps.project, deps.sourceVideos, undefined, editor, newFile)
+      expect(opened.streams).toHaveLength(0)
+      expect(deps.showNotification).toHaveBeenCalledWith(leftOutNotice, 'info')
+    })
+
+    it('names several sources in one notice', async () => {
+      vi.mocked(saveProjectToFile).mockResolvedValue(['"a.webm"', '"b.mp4"'])
+      const { result } = mountActions()
+
+      await save(result)
+
+      expect(deps.showNotification).toHaveBeenCalledWith(
+        'Project saved without the media for "a.webm", "b.mp4", which are no longer stored in this browser. ' +
+          'The clips that use them stay in the project, without media.',
+        'info'
+      )
+    })
+
+    it('opens the picker before anything is awaited, so the click can still open it', () => {
+      const { result } = mountActions()
+
+      act(() => {
+        void result.current.handleSaveProject()
+      })
+
+      expect(picker()).toHaveBeenCalledTimes(1)
+    })
   })
 })

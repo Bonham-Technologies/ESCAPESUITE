@@ -7,6 +7,7 @@ import {
   makeToneWav,
   keyframePanel,
   inspector,
+  exportButtonName,
 } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
@@ -22,7 +23,7 @@ test.describe('Export Dialog', () => {
   test('export dialog opens', async ({ page }) => {
     await openExportDialog(page)
 
-    await expect(page.getByRole('button', { name: 'Download WebM' }).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: exportButtonName('webm') }).first()).toBeVisible()
   })
 
   test('export format selection works', async ({ page }) => {
@@ -36,7 +37,7 @@ test.describe('Export Dialog', () => {
     await expect(mp4).toBeChecked()
 
     // Choosing a format retargets the download button
-    await expect(page.getByRole('button', { name: 'Download MP4' }).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: exportButtonName('mp4') }).first()).toBeVisible()
   })
 
   test('export quality selection available', async ({ page }) => {
@@ -66,7 +67,7 @@ test.describe('Export Dialog', () => {
   test('export progress display exists', async ({ page }) => {
     await openExportDialog(page)
 
-    await page.getByRole('button', { name: 'Download WebM' }).first().click()
+    await page.getByRole('button', { name: exportButtonName('webm') }).first().click()
 
     // Encoding reports which frame it is on, so the user can tell it is moving
     // `.first()` since ESCSUITE-215: the progress view's live region carries

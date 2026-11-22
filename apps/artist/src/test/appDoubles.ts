@@ -91,7 +91,10 @@ export function projectManagerDouble() {
     saveProject: vi.fn(() => Promise.resolve()),
     loadProject: vi.fn(() => Promise.resolve({ project: {}, sourceVideos: [] })),
     showOpenProjectDialog: vi.fn(() => Promise.resolve(null)),
-    saveProjectToFile: vi.fn(() => Promise.resolve()),
+    // Answers the names of the sources it left out (ESCSUITE-497): none.
+    saveProjectToFile: vi.fn(() => Promise.resolve([] as string[])),
+    // The in-place Save's check (ESCSUITE-497): every source is stored.
+    findMissingSources: vi.fn(() => Promise.resolve([] as string[])),
     PROJECT_FILE_TYPE: { description: 'Video Editor Project', accept: { 'application/octet-stream': ['.veditor'] } },
   }
 }
