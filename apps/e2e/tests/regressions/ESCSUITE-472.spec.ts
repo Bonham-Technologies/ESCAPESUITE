@@ -11,6 +11,8 @@ import { waitForAppReady } from '../../utils/ready'
  * dropped) unless "Full video" is picked, matching the two export buttons.
  * The row is left out when there is no marker. A list YouTube would not accept (fewer
  * than three chapters, one under ten seconds) shows a warning naming the rule.
+ * ESCSUITE-496: markers in the same whole second make one line, and a label
+ * that starts with a time is written after "- ".
  *
  * A 120 s tone is the timeline; nothing is exported, so this runs everywhere.
  * The clipboard is stubbed on the prototype (Firefox and WebKit cannot be
@@ -141,6 +143,22 @@ test.describe('ESCSUITE-472: markers as YouTube chapters in the export dialog', 
     await expect
       .poll(() => page.evaluate(() => (window as unknown as { __copied: string }).__copied))
       .toBe('0:00 Intro\n0:05 Before\n0:40 In A\n1:10 In B\n1:50 After')
+  })
+
+  // ESCSUITE-496: two markers in the same whole second make one line (the
+  // first one's label), so the times stay strictly ascending, and a label that
+  // starts with a time is set apart with "- " so YouTube does not read it as
+  // a second timestamp.
+  test('markers in the same second make one line, and a label starting with a time is set apart', async ({ page }) => {
+    await loadProject(page, [[10.2, 'Setup'], [10.9, 'Same second'], [40, '2:30 recap'], [90, 'Wrap up']])
+    await openExportDialog(page)
+
+    const row = page.getByRole('group', { name: 'Chapters' })
+    await row.getByRole('button', { name: 'Copy chapters' }).click()
+    await expect(row.getByRole('status').filter({ hasText: 'Chapters copied' })).toHaveCount(1)
+    expect(await page.evaluate(() => (window as unknown as { __copied: string }).__copied)).toBe(
+      '0:00 Intro\n0:10 Setup\n0:40 - 2:30 recap\n1:30 Wrap up'
+    )
   })
 
   test('without markers the Chapters row is left out', async ({ page }) => {
