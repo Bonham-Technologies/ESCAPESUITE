@@ -27,6 +27,7 @@ import {
   openExportDialog,
   openExportAdvancedOptions,
   makeToneWav,
+  exportButtonName,
 } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 import { AV_FIXTURE_WEBM } from '../../utils/mediaHealth'
@@ -1671,7 +1672,7 @@ test.describe('Color Contrast', () => {
         await openExportDialog(page)
         await openExportAdvancedOptions(page)
         await page.getByRole('radio', { name: /MP4/ }).check()
-        await page.getByRole('button', { name: 'Download MP4' }).first().click()
+        await page.getByRole('button', { name: exportButtonName('mp4') }).first().click()
 
         const bar = page.getByRole('dialog').getByRole('progressbar', { name: 'Export progress' })
         await expect(bar).toBeVisible({ timeout: 30_000 })

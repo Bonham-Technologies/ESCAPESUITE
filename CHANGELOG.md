@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- ESCAPEARTIST: in Chrome and Edge, where the export dialog's buttons open a save dialog and write to the file you choose, they now read "Export WebM…", "Export MP4…" and "Export GIF…" instead of "Download …", for screen readers too; browsers that download the export keep "Download …" (ESCSUITE-498).
 - ESCAPEARTIST: Zoom to region and Crop on canvas close when you select another clip or deselect, so selecting the first clip again shows them closed instead of reopening the box and the form by themselves; selecting the same clip again keeps them open (ESCSUITE-500).
 - Tests: the e2e WebM reader now also reads frames stored in BlockGroups, where Mediabunny puts the last frame of each Cluster, so specs that count or check an ESCAPEARTIST export's or ESCAPECRAFT take's frames see every frame (150 of 150 in a five-second export, not 145) (ESCSUITE-494).
 - ESCAPEARTIST: the export dialog's YouTube chapter list makes one line for markers in the same second (keeping the first one's label), so its times always go up and YouTube accepts it, and a marker label that starts with a time, such as "2:30 recap", is written after a dash ("0:15 - 2:30 recap") so YouTube does not read it as the chapter's time (ESCSUITE-496).

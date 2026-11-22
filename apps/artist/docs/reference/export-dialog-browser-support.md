@@ -175,12 +175,14 @@ now-MP4-less browser still exporting, as WebM, when the Advanced button is click
 `effectiveAdvancedFormat` recomputes that same fallback, the button disables exactly when *that*
 format is blocked (with the blocking reason as its `title`), and its text reads
 `effectiveAdvancedFormat` too: a restored `{format:'mp4'}` in a browser whose H.264 probe says no
-shows an enabled "Download WebM", not an enabled "Download MP4" that silently writes a `.webm`
+shows an enabled "Download WebM" (or "Export WebM…"), not an enabled "Download MP4" that silently writes a `.webm`
 — the MP4 *radio* still stays checked and disabled with its own reason (ESCSUITE-175), since the
 ticket is about what the button under it promises to produce, not about hiding the user's saved
 choice. Since ESCSUITE-34 it is three-way, and **GIF short-circuits the fallback entirely**: a
 `'gif'` selection is its own effective format, so `advancedBlockedReason` is `null` whenever GIF
-is chosen and nothing can disable that button but an empty timeline.
+is chosen and nothing can disable that button but an empty timeline. Where the browser's save
+picker may open, every "Download {format}" here reads "Export {format}…" instead
+(ESCSUITE-498, `saving-to-a-picked-file.md`); the gating is the same.
 
 **The GIF controls (ESCSUITE-34).** GIF is a third radio under Advanced options, beside MP4 — not
 a fourth primary button: WebM stays the default and GIF is a deliberate choice, like MP4. Four

@@ -6,6 +6,7 @@ import {
   inspector,
   mobileInspectorToggle,
   openMobileInspector,
+  exportButtonName,
 } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
@@ -145,7 +146,7 @@ test.describe('ESCAPEARTIST Export Dialog Responsive', () => {
     // Nothing in the dialog is pushed off the side of a 375px viewport
     for (const target of [
       page.getByRole('heading', { name: 'Export Video' }),
-      page.getByRole('button', { name: 'Download WebM' }).first(),
+      page.getByRole('button', { name: exportButtonName('webm') }).first(),
       page.getByRole('button', { name: 'Cancel', exact: true }),
     ]) {
       const box = await target.boundingBox()

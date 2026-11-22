@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { ARTIST_URL, makeToneWav, openExportDialog } from '../../utils/artist'
+import { ARTIST_URL, makeToneWav, openExportDialog, exportButtonName } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
 /**
@@ -164,7 +164,7 @@ test.describe('ESCSUITE-472: markers as YouTube chapters in the export dialog', 
   test('without markers the Chapters row is left out', async ({ page }) => {
     await loadProject(page, [])
     await openExportDialog(page)
-    await expect(page.getByRole('button', { name: 'Export Full Video' }).or(page.getByRole('button', { name: 'Download WebM' })).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Export Full Video' }).or(page.getByRole('button', { name: exportButtonName('webm') })).first()).toBeVisible()
     await expect(page.getByRole('group', { name: 'Chapters' })).toHaveCount(0)
   })
 })

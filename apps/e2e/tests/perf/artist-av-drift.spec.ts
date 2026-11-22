@@ -8,6 +8,7 @@ import {
   importMediaAndAddToTimeline,
   openExportAdvancedOptions,
   openExportDialog,
+  exportButtonName,
 } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
@@ -162,7 +163,7 @@ async function exportOnce(page: Page, format: 'webm' | 'mp4', dir: string, timeo
   const started = Date.now()
   const downloadPromise = page.waitForEvent('download', { timeout: timeoutMs })
   // The Advanced panel's button sits after the primary "Download WebM" in the DOM.
-  await page.getByRole('button', { name: format === 'mp4' ? 'Download MP4' : 'Download WebM' }).last().click()
+  await page.getByRole('button', { name: exportButtonName(format === 'mp4' ? 'mp4' : 'webm') }).last().click()
   const download = await downloadPromise
   const seconds = (Date.now() - started) / 1000
   const file = `artist-${format}-${download.suggestedFilename()}`
