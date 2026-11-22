@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- ESCAPEARTIST: Zoom to region and Crop on canvas close when you select another clip or deselect, so selecting the first clip again shows them closed instead of reopening the box and the form by themselves; selecting the same clip again keeps them open (ESCSUITE-500).
 - Tests: the e2e WebM reader now also reads frames stored in BlockGroups, where Mediabunny puts the last frame of each Cluster, so specs that count or check an ESCAPEARTIST export's or ESCAPECRAFT take's frames see every frame (150 of 150 in a five-second export, not 145) (ESCSUITE-494).
 - ESCAPEARTIST: the export dialog's YouTube chapter list makes one line for markers in the same second (keeping the first one's label), so its times always go up and YouTube accepts it, and a marker label that starts with a time, such as "2:30 recap", is written after a dash ("0:15 - 2:30 recap") so YouTube does not read it as the chapter's time (ESCSUITE-496).
 - ESCAPEARTIST: shortcut hints show ⌘ on a Mac or an iPad instead of "Ctrl", in the keyboard shortcuts sheet, the File menu, the toolbar and header tooltips and the undo notes (Go to Previous Marker shows ⌃M, as ⌘M minimises the window), and screen readers hear the key spelled out as "Command" or "Control"; other systems still show Ctrl (ESCSUITE-491).

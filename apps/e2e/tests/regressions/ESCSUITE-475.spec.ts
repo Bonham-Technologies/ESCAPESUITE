@@ -91,8 +91,12 @@ async function zoomKeyframes(page: Page): Promise<Record<string, number[]>> {
   return Object.fromEntries(['x', 'y', 'scaleX', 'scaleY'].map((p) => [p, (keyframes[p] ?? []).map((kf) => kf.time)]))
 }
 
-/** Import the fixture into a project of its own size, and select its clip. */
-async function openFixture(page: Page): Promise<void> {
+/**
+ * Import the fixture into a project of its own size, and select its clip.
+ * `copies: 2` puts a second copy of the clip right after the first
+ * (ESCSUITE-500 needs another clip to select).
+ */
+async function openFixture(page: Page, copies: 1 | 2 = 1): Promise<void> {
   await page.route('https://va.vercel-scripts.com/**', (route) =>
     route.fulfill({ status: 200, contentType: 'text/javascript', body: '' })
   )
@@ -101,8 +105,12 @@ async function openFixture(page: Page): Promise<void> {
   await importMediaAndAddToTimeline(page, FIXTURE)
   const project = await getProject(page)
   project.resolution = { width: WIDTH, height: HEIGHT }
+  if (copies === 2) {
+    const first = project.timeline.clips[0] as ProjectShape['timeline']['clips'][number] & { timelinePosition: number }
+    project.timeline.clips.push({ ...first, id: `${first.id}-copy`, timelinePosition: first.timelinePosition + CLIP_SECONDS } as typeof first)
+  }
   await page.evaluate((payload) => window.postMessage({ type: 'LOAD_PROJECT', payload }, '*'), project)
-  await expect(page.getByText(/^1 clip/).first()).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText(copies === 2 ? /^2 clips/ : /^1 clip/).first()).toBeVisible({ timeout: 15_000 })
   await page.locator('[data-clip-id]').first().click()
 }
 
@@ -324,5 +332,32 @@ test.describe('ESCSUITE-475: Zoom to region', () => {
     await expect(page.getByRole('heading', { name: 'Zoom to region' })).toBeHidden()
     await expect(page.getByRole('button', { name: 'Zoom to region' })).toHaveAttribute('aria-pressed', 'false')
     expect(await zoomKeyframes(page)).toEqual({ x: [], y: [], scaleX: [], scaleY: [] })
+  })
+
+  // ESCSUITE-500: leaving the clip closes the tool for good. Before the fix the
+  // latch stayed set while another clip (or none) was selected, so selecting
+  // the first clip again reopened the box and the form unasked. Crop mode
+  // (the same kind of latch) is checked the same way.
+  test('selecting another clip and then the first one again shows the tool closed', async ({ page }) => {
+    await openFixture(page, 2)
+    const clips = page.locator('[data-clip-id]')
+    const zoomButton = page.getByRole('button', { name: 'Zoom to region' })
+    const zoomHeading = page.getByRole('heading', { name: 'Zoom to region' })
+
+    await seek(page, 1)
+    await openZoomToRegion(page)
+    await clips.nth(1).click()
+    await expect(zoomHeading).toBeHidden()
+    await clips.nth(0).click()
+    await expect(zoomButton).toHaveAttribute('aria-pressed', 'false')
+    await expect(zoomHeading).toBeHidden()
+    await expect(page.getByTestId('zoom-region-picker')).toHaveCount(0)
+
+    const cropButton = page.getByRole('button', { name: 'Crop on canvas' })
+    await cropButton.click()
+    await expect(cropButton).toHaveAttribute('aria-pressed', 'true')
+    await clips.nth(1).click()
+    await clips.nth(0).click()
+    await expect(cropButton).toHaveAttribute('aria-pressed', 'false')
   })
 })
