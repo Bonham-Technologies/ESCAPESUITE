@@ -175,7 +175,7 @@ now-MP4-less browser still exporting, as WebM, when the Advanced button is click
 `effectiveAdvancedFormat` recomputes that same fallback, the button disables exactly when *that*
 format is blocked (with the blocking reason as its `title`), and its text reads
 `effectiveAdvancedFormat` too: a restored `{format:'mp4'}` in a browser whose H.264 probe says no
-shows an enabled "Download WebM", not an enabled "Download MP4" that silently writes a `.webm`
+shows an enabled "Download WebM" (or "Export WebM…"), not an enabled "Download MP4" that silently writes a `.webm`
 — the MP4 *radio* still stays checked and disabled with its own reason (ESCSUITE-175), since the
 ticket is about what the button under it promises to produce, not about hiding the user's saved
 choice. Since ESCSUITE-34 it is three-way, and **GIF short-circuits the fallback entirely**: a

@@ -88,7 +88,7 @@ and measures nothing.
   the completion — no second region and no new dialog state. The choice is in the Advanced panel
   beside Quality (hidden for GIF, kept in `advancedOptions` like Quality), off by default,
   persisted in `lastExportSettings.loudnessTarget` and read back through `loudnessTargetOrOff`,
-  so a stale or foreign value is off. The primary "Download WebM" button uses fixed defaults and
+  so a stale or foreign value is off. The primary WebM button ("Download WebM", or "Export WebM…" where a save picker opens) uses fixed defaults and
   so never normalises, exactly as it never uses the Quality choice; it still measures. The host's
   `EXPORT_COMPLETE` message is unchanged.
 - **Headless.** A job's `options.loudnessTarget` reaches the exporter through the options spread
