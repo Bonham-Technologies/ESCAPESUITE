@@ -29,8 +29,9 @@ export interface ZoomRegionTarget {
  * Is Zoom to region open, and on what?
  *
  * Only while the latch names the selected clip — so selecting another clip,
- * deselecting, deleting it, loading a project or undoing it away all close the
- * tool with nothing to clear — and only for a video clip the frame draws: on a
+ * deselecting, deleting it, loading a project or undoing it away all hide the
+ * tool at once (and the store clears the latch then, ESCSUITE-500, so
+ * reselecting the clip shows it closed) — and only for a video clip the frame draws: on a
  * visible track, with a picture source. An overlay has no source to find; an
  * image or audio source is not a video clip.
  */
