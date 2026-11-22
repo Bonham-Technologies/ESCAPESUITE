@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { ARTIST_URL, importMediaAndAddToTimeline, openExportDialog } from '../../utils/artist'
+import { ARTIST_URL, importMediaAndAddToTimeline, openExportDialog, exportButtonName } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
 /**
@@ -67,7 +67,7 @@ test.describe('ESCSUITE-474: the screen stays on while ARTIST exports', () => {
 
     await openExportDialog(page)
     const download = page.waitForEvent('download', { timeout: 90_000 })
-    await page.getByRole('button', { name: 'Download WebM' }).first().click()
+    await page.getByRole('button', { name: exportButtonName('webm') }).first().click()
     await download
 
     await expect.poll(async () => (await counts(page)).requests).toEqual(['screen'])

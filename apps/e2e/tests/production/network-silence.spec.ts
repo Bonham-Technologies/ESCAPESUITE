@@ -1,7 +1,7 @@
 import { statSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
 import { mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-mocks'
-import { openExportAdvancedOptions, openExportDialog } from '../../utils/artist'
+import { openExportAdvancedOptions, openExportDialog, exportButtonName } from '../../utils/artist'
 import { canConvertToMp4 } from '../../utils/webcodecs'
 import { waitForAppReady } from '../../utils/ready'
 import {
@@ -28,7 +28,7 @@ import {
 const ORIGIN = 'http://localhost:5190'
 
 /** Wait for an export to download, failing on the dialog's own error the moment it shows. */
-async function downloadExport(page: Page, buttonName: string): Promise<string> {
+async function downloadExport(page: Page, buttonName: RegExp): Promise<string> {
   const downloadPromise = page.waitForEvent('download', { timeout: 120_000 })
   const exportFailed = page.getByRole('alert').filter({ hasText: 'Export failed' })
   const failurePromise = exportFailed
@@ -106,7 +106,7 @@ test.describe('Hosted build network silence (ESCSUITE-402)', () => {
 
     await test.step('export WebM', async () => {
       await openExportDialog(artist)
-      expect(await downloadExport(artist, 'Download WebM')).toMatch(/\.webm$/)
+      expect(await downloadExport(artist, exportButtonName('webm'))).toMatch(/\.webm$/)
       // The dialog closes itself two seconds after "Export complete!".
       await expect(artist.getByRole('heading', { name: 'Export Video' })).toBeHidden({
         timeout: 10_000,
@@ -122,7 +122,7 @@ test.describe('Hosted build network silence (ESCSUITE-402)', () => {
       await openExportDialog(artist)
       await openExportAdvancedOptions(artist)
       await artist.getByRole('radio', { name: /MP4/ }).check()
-      expect(await downloadExport(artist, 'Download MP4')).toMatch(/\.mp4$/)
+      expect(await downloadExport(artist, exportButtonName('mp4'))).toMatch(/\.mp4$/)
       // The hosted build keeps the worker as its own chunk beside index.html.
       expect(tracker.requests().some((url) => url.startsWith(`${ORIGIN}/artist/decodeWorker-`))).toBe(true)
     })

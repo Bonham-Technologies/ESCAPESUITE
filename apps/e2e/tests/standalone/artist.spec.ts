@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { readFileSync } from 'node:fs'
-import { seedTextClip } from '../../utils/artist'
+import { seedTextClip, exportButtonName } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 import { assertNetworkSilence, trackNetworkSilence } from '../../utils/networkSilence'
 
@@ -156,7 +156,7 @@ test.describe('ESCAPEARTIST Standalone - No External Dependencies', () => {
     // real action stays silent.
     await seedTextClip(page)
     await page.getByRole('button', { name: 'Export video' }).click()
-    await page.getByRole('button', { name: 'Download WebM' }).first().click()
+    await page.getByRole('button', { name: exportButtonName('webm') }).first().click()
     // `.first()` since ESCSUITE-215: the progress view's live region carries
     // the same words a second time, for ears rather than eyes.
     await expect(page.getByText('Export complete!').first()).toBeVisible({ timeout: 30_000 })

@@ -12,12 +12,15 @@ import { createSelectionSlice } from './selectionSlice';
 import { createPlaybackSlice } from './playbackSlice';
 import { createMarkerSlice } from './markerSlice';
 import { createUiSlice } from './uiSlice';
+import { latchesFollowSelection } from './toolLatches';
 
 // The pure helpers moved to their own modules — none of them reads the store —
 // and DEFAULT_PROJECT_NAME is re-exported here so every existing import path still resolves.
 export { DEFAULT_PROJECT_NAME } from './projectFactory';
 
-export const useEditorStore = create<EditorState>((...a) => ({
+// latchesFollowSelection: crop mode and Zoom to region close when the
+// selection leaves their clip (ESCSUITE-500, `toolLatches.ts`).
+export const useEditorStore = create<EditorState>(latchesFollowSelection((...a) => ({
   ...createHistorySlice(...a),
   ...createProjectSlice(...a),
   ...createTrackSlice(...a),
@@ -28,7 +31,7 @@ export const useEditorStore = create<EditorState>((...a) => ({
   ...createPlaybackSlice(...a),
   ...createMarkerSlice(...a),
   ...createUiSlice(...a),
-}));
+})));
 
 // Selectors for common derived state
 export const selectTimelineDuration = (state: EditorState) => state.project.timeline.duration;

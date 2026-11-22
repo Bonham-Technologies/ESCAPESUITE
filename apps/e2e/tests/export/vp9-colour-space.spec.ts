@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { readFileSync } from 'node:fs'
-import { ARTIST_URL, openExportDialog, seedTextClip } from '../../utils/artist'
+import { ARTIST_URL, openExportDialog, seedTextClip, exportButtonName } from '../../utils/artist'
 import { recordATake } from '../../utils/craft'
 import { storedRecordingBytes } from '../../utils/craftTakes'
 import { grantMediaPermissions, mockSyntheticMedia } from '../../utils/media-mocks'
@@ -238,7 +238,7 @@ test.describe('ESCSUITE-485: VP9 key frame headers carry the colour matrix', () 
       await seedTextClip(page)
       await openExportDialog(page)
 
-      const downloadWebM = page.getByRole('button', { name: 'Download WebM' }).first()
+      const downloadWebM = page.getByRole('button', { name: exportButtonName('webm') }).first()
       // Chromium must assert, never skip: a skip there would hide the whole guard on every PR.
       if (browserName === 'chromium') await expect(downloadWebM, 'Chromium can export WebM').toBeEnabled()
       test.skip(!(await downloadWebM.isEnabled()), 'This browser cannot export WebM')

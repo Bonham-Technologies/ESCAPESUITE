@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
-import { ARTIST_URL, importMediaAndAddToTimeline, openExportAdvancedOptions, openExportDialog } from '../../utils/artist'
+import { ARTIST_URL, importMediaAndAddToTimeline, openExportAdvancedOptions, openExportDialog, exportButtonName } from '../../utils/artist'
 import { describeAvSync, readAvSync } from '../../utils/avSync'
 import { resolveCapturePath, type CapturePath } from '../../utils/capturePath'
 import { CAPTURE_SIZE, CRAFT_URL } from '../../utils/craftPerf'
@@ -139,7 +139,7 @@ async function exportTimeline(page: Page, format: 'webm' | 'mp4', file: string):
   await page.locator('select').filter({ has: page.locator('option[value="480p"]') }).selectOption('project')
   const download = page.waitForEvent('download', { timeout: EXPORT_TIMEOUT_MS })
   // The Advanced panel's button sits after the primary "Download WebM" in the DOM.
-  await page.getByRole('button', { name: format === 'mp4' ? 'Download MP4' : 'Download WebM' }).last().click()
+  await page.getByRole('button', { name: exportButtonName(format === 'mp4' ? 'mp4' : 'webm') }).last().click()
   await (await download).saveAs(file)
   await page.keyboard.press('Escape')
 }

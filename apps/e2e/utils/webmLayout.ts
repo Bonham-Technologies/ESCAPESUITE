@@ -5,8 +5,12 @@
  * has to answer yes to: does every video frame have a timecode of its own, and
  * does every key frame open its Cluster's video with a cue pointing at it?
  *
- * SimpleBlocks only, which is everything Mediabunny writes; Clusters of known
- * size or of unknown size (a Cluster then runs until the next one starts).
+ * Frames in SimpleBlocks and in BlockGroups (ESCSUITE-494): Mediabunny writes
+ * SimpleBlocks, except the last frame of each track in a Cluster, which it
+ * puts in a BlockGroup so it can carry a BlockDuration. A BlockGroup's Block has
+ * no keyframe flag; it is a key frame when the group has no ReferenceBlock.
+ * Clusters of known size or of unknown size (a Cluster then runs until the
+ * next one starts).
  */
 
 const SEGMENT = 0x18538067
@@ -120,20 +124,30 @@ export function readWebmLayout(bytes: Uint8Array): WebmLayout {
         const child = element(i)
         if (child.id === CLUSTER) break
         if (child.id === 0xe7) timecode = uint(child)
+        // A SimpleBlock, or a BlockGroup's Block (0xa1) with its ReferenceBlocks (0xfb).
+        let block: ReturnType<typeof element> | undefined
+        let key = false
         if (child.id === 0xa3) {
-          const length = vintLength(bytes[child.dataStart])
-          let track = bytes[child.dataStart] & (0xff >> length)
-          for (let k = 1; k < length; k++) track = track * 256 + bytes[child.dataStart + k]
-          const head = child.dataStart + length
+          block = child
+        } else if (child.id === 0xa0) {
+          const fields = children(child)
+          block = fields.find((f) => f.id === 0xa1)
+          key = !fields.some((f) => f.id === 0xfb)
+        }
+        if (block) {
+          const length = vintLength(bytes[block.dataStart])
+          let track = bytes[block.dataStart] & (0xff >> length)
+          for (let k = 1; k < length; k++) track = track * 256 + bytes[block.dataStart + k]
+          const head = block.dataStart + length
           const relative = (((bytes[head] << 8) | bytes[head + 1]) << 16) >> 16
           if (track === layout.videoTrack) {
             layout.videoBlocks.push({
               time: timecode + relative,
-              key: (bytes[head + 2] & 0x80) !== 0,
+              key: block === child ? (bytes[head + 2] & 0x80) !== 0 : key,
               cluster,
               firstInCluster: !sawVideo,
               // After the timecode and the flags byte; Mediabunny never laces.
-              data: bytes.subarray(head + 3, child.end),
+              data: bytes.subarray(head + 3, block.end),
             })
             sawVideo = true
           }

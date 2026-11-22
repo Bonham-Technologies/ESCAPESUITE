@@ -8,6 +8,16 @@ checked before anything is awaited, and the download path adds no `await` in fro
 
 ## Export
 
+- **The buttons say Export** (ESCSUITE-498). Where a click opens the picker (`mayPickSaveFile`:
+  the browser has `showSaveFilePicker` and the page is the top-level page or from the same origin
+  as it, since Chromium refuses the picker in a cross-origin frame and the export then downloads),
+  the dialog's buttons read "Export WebM…", "Export MP4…" and "Export GIF…", the ellipsis saying a
+  dialog follows; everywhere else they keep "Download WebM", "Download MP4" and "Download GIF". The
+  accessible name is the text. The e2e specs select them with `exportButtonName(format)` from
+  `apps/e2e/utils/artist.ts`, which matches either wording (e2e Chromium has no picker, so they
+  read Download there); the ESCSUITE-470 spec asserts "Export WebM…" with its stand-in picker and
+  "Download WebM" without one. `handleExport` asks for the picker by the same `mayPickSaveFile`,
+  so the words and the click always agree: in a cross-origin frame it downloads without trying.
 - **The picker comes first.** `handleExport` works out the format and the file name
   (`<project>.<format>`) and calls `chooseSaveDestination` before any `await`, because the picker
   needs the click's user activation and an earlier `await` can spend it. The picker's type list

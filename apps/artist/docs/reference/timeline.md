@@ -241,10 +241,15 @@ looking at a crop is reading, not editing (the eight handles go inert there, via
 their own `disabled`, not the latch). The **one** thing that disables it is a
 clip whose source has left the media library — `sourceWidth` 0, which
 `cropTarget` refuses — where latching would mean a pressed toggle with nothing on
-the canvas, so it is `disabled` with a `title` saying why instead. It is a latch deliberately left unsynchronised: nothing clears it
-on a selection change, a clip delete, a project load or an undo, because every
-reader is required to compare it to the current selection rather than trust it
-on its own — which is how all four of those leave crop mode for free. Escape
+the canvas, so it is `disabled` with a `title` saying why instead. Every
+reader compares the latch to the current selection rather than trusting it on
+its own, which is how a selection change, a clip delete, a project load and an
+undo all hide crop mode at once. **Since ESCSUITE-500 the store also clears it**
+whenever `selectedClipId` changes to anything other than the clip it names
+(`store/toolLatches.ts`, merged into the same write), so selecting the clip
+again shows crop mode closed instead of reopening it unasked. A write that
+keeps the same `selectedClipId` (a multi-selection change that leaves the
+primary clip, an undo that keeps the clip) leaves it open. Escape
 leaves it too, second in the cascade (`useAppKeyboardShortcuts.ts`, above),
 ahead of the in/out points and the two selection branches so that deselecting
 is never what leaves crop mode — and the same Escape leaves it from a focused

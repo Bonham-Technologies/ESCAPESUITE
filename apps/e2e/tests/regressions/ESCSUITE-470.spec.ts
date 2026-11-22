@@ -154,6 +154,12 @@ async function openArtistWithTextClip(page: Page): Promise<void> {
 
 const EXPORT_NAME = 'Untitled Project.webm'
 
+/**
+ * The export dialog's WebM button where a click opens the save picker: it says
+ * "Export WebM…", not "Download WebM" (ESCSUITE-498).
+ */
+const exportWebM = (page: Page) => page.getByRole('button', { name: 'Export WebM…', exact: true })
+
 test.describe('ESCSUITE-470: export and save to a file the user picks', () => {
   test.describe('where the browser can pick a file', () => {
     test.skip(({ browserName }) => browserName !== 'chromium', "showSaveFilePicker is Chromium's alone")
@@ -169,8 +175,11 @@ test.describe('ESCSUITE-470: export and save to a file the user picks', () => {
       await seedPrivateFile(page, EXPORT_NAME, STALE_BYTES)
 
       await page.getByRole('button', { name: 'Export video' }).click()
+      // ESCSUITE-498: the button says what a click does here.
+      await expect(exportWebM(page).first()).toBeVisible()
+      await expect(page.getByRole('button', { name: /download (webm|mp4|gif)/i })).toHaveCount(0)
       await page.evaluate(() => ((window as unknown as PickerWindow).__countBlobs = true))
-      await page.getByRole('button', { name: /download webm/i }).first().click()
+      await exportWebM(page).first().click()
       await expect(page.getByRole('status').filter({ hasText: 'Export complete!' })).toContainText(`Export complete! Saved to ${EXPORT_NAME}.`, {
         timeout: 90_000,
       })
@@ -207,13 +216,13 @@ test.describe('ESCSUITE-470: export and save to a file the user picks', () => {
       await page.evaluate(() => ((window as unknown as PickerWindow).__pickerCancels = true))
 
       await page.getByRole('button', { name: 'Export video' }).click()
-      await page.getByRole('button', { name: /download webm/i }).first().click()
+      await exportWebM(page).first().click()
 
       await expect.poll(() => page.evaluate(() => (window as unknown as PickerWindow).__picks)).toBe(1)
       // The dialog is as it was: no progress, no error, the buttons still there.
       await expect(page.getByRole('progressbar')).toHaveCount(0)
       await expect(page.getByRole('alert').filter({ hasText: 'Export failed' })).toHaveCount(0)
-      await expect(page.getByRole('button', { name: /download webm/i }).first()).toBeEnabled()
+      await expect(exportWebM(page).first()).toBeEnabled()
       expect(await page.evaluate(() => (window as unknown as PickerWindow).__writes)).toBe(0)
     })
 
@@ -225,7 +234,7 @@ test.describe('ESCSUITE-470: export and save to a file the user picks', () => {
       await page.evaluate(() => ((window as unknown as PickerWindow).__writeDelayMs = 300))
 
       await page.getByRole('button', { name: 'Export video' }).click()
-      await page.getByRole('button', { name: /download webm/i }).first().click()
+      await exportWebM(page).first().click()
       await expect.poll(() => page.evaluate(() => (window as unknown as PickerWindow).__writes)).toBeGreaterThan(0)
       await page.getByRole('button', { name: 'Cancel', exact: true }).click()
 
@@ -241,7 +250,7 @@ test.describe('ESCSUITE-470: export and save to a file the user picks', () => {
       await page.evaluate(() => ((window as unknown as PickerWindow).__failWrite = 2))
 
       await page.getByRole('button', { name: 'Export video' }).click()
-      await page.getByRole('button', { name: /download webm/i }).first().click()
+      await exportWebM(page).first().click()
 
       await expect(page.getByRole('alert').filter({ hasText: 'Export failed' })).toContainText(
         `Could not write "${EXPORT_NAME}": the disk is full.`,
@@ -249,7 +258,7 @@ test.describe('ESCSUITE-470: export and save to a file the user picks', () => {
       )
       // Stopped: the buttons are back, nothing more is written, and the file
       // the picker made is gone.
-      await expect(page.getByRole('button', { name: /download webm/i }).first()).toBeEnabled()
+      await expect(exportWebM(page).first()).toBeEnabled()
       const writes = await page.evaluate(() => (window as unknown as PickerWindow).__writes)
       await page.waitForTimeout(1000)
       expect(await page.evaluate(() => (window as unknown as PickerWindow).__writes)).toBe(writes)
@@ -310,7 +319,8 @@ test.describe('ESCSUITE-470: export and save to a file the user picks', () => {
     await page.keyboard.press('Escape')
 
     await page.getByRole('button', { name: 'Export video' }).click()
-    const downloadWebM = page.getByRole('button', { name: /download webm/i }).first()
+    // ESCSUITE-498: the button says Download where the export downloads.
+    const downloadWebM = page.getByRole('button', { name: 'Download WebM', exact: true }).first()
     test.skip(!(await downloadWebM.isEnabled()), 'This browser cannot encode WebM here')
     const download = page.waitForEvent('download', { timeout: 90_000 })
     await downloadWebM.click()
