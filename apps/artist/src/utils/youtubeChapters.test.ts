@@ -86,6 +86,16 @@ describe('buildYoutubeChapters', () => {
     expect(r.text).toBe('0:00 Start\n0:20 B\n0:40 C');
   });
 
+  it('checks the YouTube rules on the merged lines, not the markers (ESCSUITE-496)', () => {
+    // Three markers, two in the first second: two lines, so the count warning fires and says 2.
+    const few = buildYoutubeChapters([mk(0.2, 'A'), mk(0.7, 'B'), mk(30, 'C')], { start: 0, end: 60 });
+    expect(few.text).toBe('0:00 A\n0:30 C');
+    expect(few.warnings).toEqual([expect.stringMatching(/at least 3 chapters.*this one has 2\./)]);
+    // The merged 0:10 line runs to 0:19 on the list YouTube reads: nine seconds, named by its kept label.
+    const short = buildYoutubeChapters([mk(10.2, 'A'), mk(10.9, 'B'), mk(19.5, 'C'), mk(40, 'D')], { start: 0, end: 60 });
+    expect(short.warnings).toEqual([expect.stringMatching(/at least 10 seconds long; too short: "A" at 0:10\.$/)]);
+  });
+
   it('separates a label that starts with a timestamp from the chapter time (ESCSUITE-496)', () => {
     const r = buildYoutubeChapters(
       [mk(15, '2:30 recap'), mk(30, '1:02:03'), mk(45, '12:00pm lunch'), mk(60, 'Part 2:30'), mk(75, '3 tips')],
