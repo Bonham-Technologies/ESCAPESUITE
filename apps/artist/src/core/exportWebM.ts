@@ -293,9 +293,21 @@ export async function exportToWebM(
     // measured on.
     const labelVideo = createWebMVideoLabeller(videoCodecFamily, isFirefoxEngine(globalThis.navigator));
     const videoEncoder = new VideoEncoder({
+      // ESCSUITE-499: nobody awaits what an `output:` callback returns, so a
+      // muxer write that fails rejects into the page as an unhandled
+      // rejection. Closing the encoders before the cancel (see the catch)
+      // stops new packets, not those already handed over: behind a slow file
+      // their writes are still pending at Cancel and land on a stream the
+      // cancel is closing. The failure becomes the track's error instead,
+      // which the frame loop and the checks before and after finalize rethrow,
+      // and which a stopped export has no more use for.
       output: async (chunk, meta) => {
         const labelled = labelVideo(EncodedPacket.fromEncodedChunk(chunk), meta);
-        await videoSource.add(labelled.packet, labelled.meta);
+        try {
+          await videoSource.add(labelled.packet, labelled.meta);
+        } catch (e) {
+          videoEncoderError ??= e instanceof Error ? e : new Error(String(e));
+        }
       },
       error: (e) => {
         console.error('Video encoder error:', e);
@@ -312,8 +324,13 @@ export async function exportToWebM(
     let audioEncoderError: Error | null = null;
     if (audioData && audioSource) {
       audioEncoder = new AudioEncoder({
+        // As the video track's (ESCSUITE-499).
         output: async (chunk, meta) => {
-          await audioSource!.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+          try {
+            await audioSource!.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+          } catch (e) {
+            audioEncoderError ??= e instanceof Error ? e : new Error(String(e));
+          }
         },
         error: (e) => {
           console.error('Audio encoder error:', e);
@@ -489,6 +506,22 @@ export async function exportToWebM(
     // an export the caller asked to stop. Thrown before the 'complete' report,
     // so the catch below does the cleanup and rethrows the abort as-is.
     checkAborted(signal);
+
+    // ESCSUITE-499: the check before the flush cannot see a packet the
+    // encoder delivers during it. A real encoder's flush() resolves without
+    // waiting for the `output:` callbacks, so those packets' `add()` calls can
+    // still be in the muxer at that point; `finalize()` queues behind them on
+    // the muxer's lock, so by now each has resolved or been caught above.
+    // Without this check a refused one would be dropped without a word and a
+    // file missing its last packets reported as complete.
+    if (videoEncoderError) {
+      log('error', `Video muxer error during finalize: ${(videoEncoderError as Error).message}`);
+      throw videoEncoderError;
+    }
+    if (audioEncoderError) {
+      log('error', `Audio muxer error during finalize: ${(audioEncoderError as Error).message}`);
+      throw audioEncoderError;
+    }
 
     // The finished file: committed to the picked file (ESCSUITE-470) before
     // the export says it is complete, so a write the disk refuses at the end

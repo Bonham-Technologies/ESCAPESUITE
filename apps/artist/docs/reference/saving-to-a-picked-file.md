@@ -57,6 +57,15 @@ checked before anything is awaited, and the download path adds no `await` in fro
   (complete) file in place. A run that wrote no bytes is not committed: `finish()` throws the
   exporters' own "no data was written" error instead, and the `discard()` after it removes the
   empty file.
+- **A Cancel behind a slow file logs nothing** (ESCSUITE-499). A WebM export cancels its Output,
+  which closes the sink's stream; packets the encoder had already handed to the muxer can still
+  be waiting behind a slow write, and their writes then land on a closing stream ("Cannot write
+  to a closing writable stream"). Both exporters' `output:` callbacks catch what the muxer's
+  `add()` rejects with and keep it as the track's error (rethrown by the frame loop and the
+  checks before and after `finalize()` while the export runs, dropped once it has stopped), so
+  nothing reaches the page as an unhandled rejection. The e2e cancel case cancels while the muxer is waiting on a
+  one-second write with packets queued behind it, and asserts no `unhandledrejection` and no
+  `pageerror`.
 - **A failed write stops the export.** The first write the stream refuses is worded for the user
   (`fileWriteError`: `QuotaExceededError` "the disk is full", `NotAllowedError`/`SecurityError`
   "permission to write to it was taken away", `NotFoundError` "it was moved or deleted",
