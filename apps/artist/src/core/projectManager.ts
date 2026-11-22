@@ -19,6 +19,7 @@ import { extractWaveformData } from '../utils/waveform';
 import {
   ProjectFileError,
   assertRangesTile,
+  missingSourcesRefusal,
   encodeProjectFile,
   formatSize,
   readOrRefuse,
@@ -127,7 +128,7 @@ export async function saveProject(
   /** Handed in, as `sourceVideos` is, rather than read from the store here. */
   editor?: EditorBlock
 ): Promise<void> {
-  const blob = await buildProjectFile(project, sourceVideos, onProgress, editor);
+  const { blob } = await buildProjectFile(project, sourceVideos, onProgress, editor);
 
   // Download file
   const url = URL.createObjectURL(blob);
@@ -145,25 +146,60 @@ export async function saveProject(
 /**
  * Save the project over the file `handle` names (ESCSUITE-470): the one it was
  * opened from, or one the save picker chose. The same bytes `saveProject`
- * downloads, written whole or not at all.
+ * downloads, written whole or not at all. Answers the quoted names of the
+ * sources it left out, which only `leaveOutMissing` allows.
  */
 export async function saveProjectToFile(
   handle: FileSystemFileHandle,
   project: Project,
   sourceVideos: SourceVideo[],
   onProgress?: (progress: number, message: string) => void,
-  editor?: EditorBlock
-): Promise<void> {
+  editor?: EditorBlock,
+  /**
+   * Leave out a used source with no stored bytes, as the download does, rather
+   * than refuse (ESCSUITE-497). Only for a file the save picker just made:
+   * Chromium's picker empties the chosen file as it is picked, so nothing in
+   * it can be lost. A save over an existing project file never passes it.
+   */
+  { leaveOutMissing = false }: { leaveOutMissing?: boolean } = {}
+): Promise<string[]> {
   // Every source's bytes, or nothing written: the download this replaces made
   // a new file and left the old one alone, but this writes over the file the
   // project came from, which may hold the only copy of a source this browser
   // no longer has (ESCSUITE-330, ESCSUITE-151).
-  const blob = await buildProjectFile(project, sourceVideos, onProgress, editor, { requireEverySource: true });
+  const { blob, missing } = await buildProjectFile(project, sourceVideos, onProgress, editor, {
+    requireEverySource: !leaveOutMissing,
+  });
   await writeBlobToFile(handle, blob);
   onProgress?.(100, 'Project saved!');
+  return missing;
 }
 
-/** The `.veditor` both saves write. */
+/**
+ * The quoted names of the sources the timeline uses that a project file would
+ * have no bytes for: one whose stored bytes are gone (by its name), or one the
+ * library no longer lists (by its id). An overlay clip's empty id uses none.
+ * An in-place Save asks this before it asks for anything else (ESCSUITE-497).
+ */
+export async function findMissingSources(project: Project, sourceVideos: SourceVideo[]): Promise<string[]> {
+  const { usedVideos, missing } = usedSources(project, sourceVideos);
+  for (const video of usedVideos) {
+    if (!(await getVideo(video.id))) missing.push(`"${video.name}"`);
+  }
+  return missing;
+}
+
+/** The library entries the timeline uses, and the quoted ids of used sources it does not list. */
+function usedSources(project: Project, sourceVideos: SourceVideo[]): { usedVideos: SourceVideo[]; missing: string[] } {
+  const usedVideoIds = new Set(project.timeline.clips.map((c) => c.sourceVideoId));
+  const usedVideos = sourceVideos.filter((v) => usedVideoIds.has(v.id));
+  const listed = new Set(usedVideos.map((v) => v.id));
+  const missing: string[] = [];
+  for (const id of usedVideoIds) if (id && !listed.has(id)) missing.push(`"${id}"`);
+  return { usedVideos, missing };
+}
+
+/** The `.veditor` both saves write, and the quoted names of the used sources it left out. */
 async function buildProjectFile(
   project: Project,
   sourceVideos: SourceVideo[],
@@ -174,20 +210,12 @@ async function buildProjectFile(
    * rather than leave it out of the file as the download always has.
    */
   { requireEverySource = false }: { requireEverySource?: boolean } = {}
-): Promise<Blob> {
+): Promise<{ blob: Blob; missing: string[] }> {
   onProgress?.(0, 'Preparing project data...');
 
-  // Get all videos used in the timeline
-  const usedVideoIds = new Set(project.timeline.clips.map((c) => c.sourceVideoId));
-  const usedVideos = sourceVideos.filter((v) => usedVideoIds.has(v.id));
-
   // Used sources with no bytes to write: one the library no longer lists, or
-  // one whose stored bytes are gone. An overlay clip's empty id uses none.
-  const missing: string[] = [];
-  if (requireEverySource) {
-    const listed = new Set(usedVideos.map((v) => v.id));
-    for (const id of usedVideoIds) if (id && !listed.has(id)) missing.push(`"${id}"`);
-  }
+  // one whose stored bytes are gone.
+  const { usedVideos, missing } = usedSources(project, sourceVideos);
 
   const sources: ProjectFileSource[] = [];
   for (const video of usedVideos) {
@@ -230,17 +258,11 @@ async function buildProjectFile(
     });
   }
 
-  if (requireEverySource && missing.length > 0) {
-    const what = missing.length === 1 ? `the media for ${missing[0]} is` : `the media for ${missing.join(', ')} are`;
-    throw new ProjectFileError(
-      `Not saved: ${what} no longer stored in this browser, so the project file would lose it. ` +
-        'The file was left as it was. Import the media again, or remove the clips that use it, then save.'
-    );
-  }
+  if (requireEverySource && missing.length > 0) throw missingSourcesRefusal(missing);
 
   onProgress?.(90, 'Creating project file...');
 
-  return new Blob(encodeProjectFile(project, editor, sources), { type: 'application/octet-stream' });
+  return { blob: new Blob(encodeProjectFile(project, editor, sources), { type: 'application/octet-stream' }), missing };
 }
 
 /**

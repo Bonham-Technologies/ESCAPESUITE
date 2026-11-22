@@ -66,6 +66,21 @@ export class ProjectFileError extends Error {
 }
 
 /**
+ * The refusal of a save over an existing project file when a source a clip
+ * uses has no stored bytes (ESCSUITE-470): writing it would leave that media
+ * out of the one file that may still hold it. `missing` is each source's
+ * quoted name. Save As makes a new file, which may leave it out (ESCSUITE-497).
+ */
+export function missingSourcesRefusal(missing: string[]): ProjectFileError {
+  const what = missing.length === 1 ? `the media for ${missing[0]} is` : `the media for ${missing.join(', ')} are`;
+  return new ProjectFileError(
+    `Not saved: ${what} no longer stored in this browser, so the project file would lose it. ` +
+      'The file was left as it was. Import the media again, or remove the clips that use it, then save. ' +
+      'Save Project As... can save a copy without it.'
+  );
+}
+
+/**
  * Read part of a project file, or refuse by name when the read rejects
  * (ESCSUITE-302): a `RangeError` is V8's string or ArrayBuffer ceiling, "the
  * file is too large to read"; anything else (the file moved, a permission
