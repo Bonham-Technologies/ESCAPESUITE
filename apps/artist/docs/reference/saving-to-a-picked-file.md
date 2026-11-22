@@ -73,9 +73,13 @@ checked before anything is awaited, and the download path adds no `await` in fro
   CRAFT, ESCSUITE-151), which only ever made a new file. Writing over the project's file could
   overwrite the one file that still holds those bytes, so an in-place Save refuses, naming each
   source: `Not saved: the media for "<name>" is no longer stored in this browser, so the project
-  file would lose it. The file was left as it was. Remove the clips that use it, then save, or
-  use Save Project As... to save a copy without it.` (a `ProjectFileError` from
-  `missingSourcesRefusal`, shown as the save's error; several sources read "them"). It does not
+  file would lose it. The file was left as it was. Remove the clips that use it, then save. Or
+  use Save Project As... to save a copy under a different name: replacing this file would lose
+  that media.` (a `ProjectFileError` from `missingSourcesRefusal`, shown as the save's error;
+  several sources read "them"). It warns against replacing the file because Chromium's picker
+  empties a file it is pointed at before anything is written, and the copy is then written
+  without the missing media, so picking the project's own file in Save As would lose the media
+  only it may hold. It does not
   say to import the media again: an import makes a new source with a new id, which the clips
   that use the missing one do not pick up. The download path is unchanged.
 - **The check comes first** (ESCSUITE-497). An in-place Save calls `findMissingSources` (a used
@@ -97,7 +101,10 @@ checked before anything is awaited, and the download path adds no `await` in fro
   dialog leaves the source out the same way, without the notice, since the load's own notice
   follows at once.
 - **Save As** (File menu, only where the picker exists; no shortcut) always asks and makes the new
-  file the project's. New Project forgets the file, and so does opening a file that arrived any
+  file the project's. When the project already has a file, it suggests `<project name> copy.veditor`
+  rather than `<project name>.veditor`, so the picker's default answer is not the project's own file
+  (ESCSUITE-497); with no file yet it suggests `<project name>.veditor`, as the first Save does. The
+  name is known before the picker opens, so nothing is awaited first. New Project forgets the file, and so does opening a file that arrived any
   other way (a drop, the `<input>` fallback) and a host's `LOAD_PROJECT` (`App` wraps the
   `setProject` it hands `useHostIntegration` with `forgetProjectFile`), so the next Save asks.
 - **One save at a time.** `save` ignores a second Save, Save As or Ctrl+S while one is running (a

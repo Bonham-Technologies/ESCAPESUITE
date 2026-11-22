@@ -111,6 +111,9 @@ test.describe('ESCSUITE-497: saving a project whose media is no longer stored', 
       timeout: 30_000,
     })
     await expect(page.getByText(/The file was left as it was\./)).toBeVisible()
+    await expect(
+      page.getByText(/save a copy under a different name: replacing this file would lose that media\./)
+    ).toBeVisible()
     expect(await picks(page)).toBe(1)
     expect(await readPrivateFile(page, PROJECT_FILE)).toEqual(saved)
   })

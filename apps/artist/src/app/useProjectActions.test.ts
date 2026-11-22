@@ -908,6 +908,22 @@ describe('saving to a file (ESCSUITE-470)', () => {
     expect(saveProjectToFile).toHaveBeenLastCalledWith(picked.handle, deps.project, deps.sourceVideos, undefined, editor)
   })
 
+  // ESCSUITE-497: the picker's default answer to Save As must not be the
+  // project's own file, which replacing would empty.
+  it('Save As from a project with a file suggests a copy\'s name; with none, the project\'s name', async () => {
+    const { result } = mountActions()
+
+    await save(result, true)
+    expect(picker()).toHaveBeenLastCalledWith(expect.objectContaining({ suggestedName: 'Untitled Project.veditor' }))
+
+    await save(result, true)
+    expect(picker()).toHaveBeenLastCalledWith(expect.objectContaining({ suggestedName: 'Untitled Project copy.veditor' }))
+
+    await openThroughPicker(result)
+    await save(result, true)
+    expect(picker()).toHaveBeenLastCalledWith(expect.objectContaining({ suggestedName: 'Untitled Project copy.veditor' }))
+  })
+
   it('forgets the file on New Project, and on opening a file that came another way', async () => {
     const { result } = mountActions()
     await save(result)
@@ -1021,8 +1037,8 @@ describe('saving to a file (ESCSUITE-470)', () => {
   describe('a source whose media is no longer stored (ESCSUITE-497)', () => {
     const refusal =
       'Not saved: the media for "take-1.webm" is no longer stored in this browser, so the project file would lose it. ' +
-      'The file was left as it was. Remove the clips that use it, then save, ' +
-      'or use Save Project As... to save a copy without it.'
+      'The file was left as it was. Remove the clips that use it, then save. ' +
+      'Or use Save Project As... to save a copy under a different name: replacing this file would lose that media.'
     const leftOutNotice =
       'Project saved without the media for "take-1.webm", which is no longer stored in this browser. ' +
       'The clips that use it stay in the project, without media.'

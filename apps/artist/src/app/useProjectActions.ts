@@ -158,7 +158,13 @@ export function useProjectActions({
       await saveProjectToFile(current, project, sourceVideos, undefined, editor);
       return [];
     }
-    const destination = await chooseSaveDestination(`${project.name || 'project'}.veditor`, PROJECT_FILE_TYPE);
+    // Save As from a project that has a file suggests another name, so the
+    // default answer is a copy rather than the project's own file: replacing
+    // it would empty it, and the media only it may hold would be left out
+    // (ESCSUITE-497). Known now, so the picker is still reached first.
+    const base = project.name || 'project';
+    const suggestedName = saveAs && projectFileRef.current ? `${base} copy.veditor` : `${base}.veditor`;
+    const destination = await chooseSaveDestination(suggestedName, PROJECT_FILE_TYPE);
     if (destination.kind === 'cancelled') return null;
     if (destination.kind === 'download') {
       await saveProject(project, sourceVideos, undefined, editor);

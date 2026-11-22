@@ -79,8 +79,8 @@ export function missingSourcesRefusal(missing: string[]): ProjectFileError {
   // that use this one do not pick up.
   return new ProjectFileError(
     `Not saved: ${what} no longer stored in this browser, so the project file would lose ${it}. ` +
-      `The file was left as it was. Remove the clips that use ${it}, then save, ` +
-      `or use Save Project As... to save a copy without ${it}.`
+      `The file was left as it was. Remove the clips that use ${it}, then save. ` +
+      'Or use Save Project As... to save a copy under a different name: replacing this file would lose that media.'
   );
 }
 
