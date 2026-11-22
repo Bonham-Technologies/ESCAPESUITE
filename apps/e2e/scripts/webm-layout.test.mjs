@@ -86,3 +86,31 @@ test('reads video frames from SimpleBlocks and from Blocks inside BlockGroups', 
 test('a well-formed file with BlockGroups has no layout problems', () => {
   assert.deepEqual(videoLayoutProblems(readWebmLayout(fixture())), [])
 })
+
+test('finds the Block wherever it sits in its BlockGroup, and a key BlockGroup mid-Cluster is a problem', () => {
+  const tracks = el(TRACKS, el(TRACK_ENTRY, uint([0xd7], 1), uint([0x83], 1), el([0x86], ...new TextEncoder().encode('V_VP9'))))
+  const cluster = el(
+    CLUSTER,
+    uint(TIMECODE, 1000),
+    el(SIMPLE_BLOCK, head(1, 0, KEY), 0x30),
+    // The spec leaves a BlockGroup's children in any order; two ReferenceBlocks are allowed.
+    el(BLOCK_GROUP, uint(BLOCK_DURATION, 33), signed(REFERENCE_BLOCK, -33), signed(REFERENCE_BLOCK, -1000), el(BLOCK, head(1, 33, 0), 0x31)),
+    // No ReferenceBlock: a key frame, and not the first of its Cluster.
+    el(BLOCK_GROUP, uint(BLOCK_DURATION, 33), el(BLOCK, head(1, -1, 0), 0x32))
+  )
+  const cues = el([0x1c, 0x53, 0xbb, 0x6b], el([0xbb], uint([0xb3], 1000), el([0xb7], uint([0xf7], 1), uint([0xf1], tracks.length))))
+  const layout = readWebmLayout(new Uint8Array([...el(EBML), ...el(SEGMENT, ...tracks, ...cluster, ...cues)]))
+  assert.deepEqual(
+    layout.videoBlocks.map(({ time, key, data }) => ({ time, key, data: [...data] })),
+    [
+      { time: 1000, key: true, data: [0x30] },
+      { time: 1033, key: false, data: [0x31] },
+      { time: 999, key: true, data: [0x32] },
+    ]
+  )
+  assert.deepEqual(videoLayoutProblems(layout), [
+    'the key frame at 999 ms has the timecode of the frame before it',
+    'the key frame at 999 ms sits mid-Cluster',
+    'the key frame at 999 ms has no cue',
+  ])
+})
