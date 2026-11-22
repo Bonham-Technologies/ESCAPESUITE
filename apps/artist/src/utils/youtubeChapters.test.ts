@@ -70,6 +70,34 @@ describe('buildYoutubeChapters', () => {
     expect(r.warnings[0]).not.toContain('"B"');
   });
 
+  it('merges markers in the same whole second into one line, keeping the first label (ESCSUITE-496)', () => {
+    const r = buildYoutubeChapters([mk(10.9, 'Second'), mk(10.2, 'First'), mk(30, 'B'), mk(30.5, 'C'), mk(60, 'D')], {
+      start: 0,
+      end: 100,
+    });
+    expect(r.text).toBe('0:00 Intro\n0:10 First\n0:30 B\n1:00 D');
+    expect(r.chapters.map((c) => c.time)).toEqual([0, 10, 30, 60]);
+    // Strictly ascending, so YouTube reads every line.
+    expect(r.chapters.every((c, i) => i === 0 || c.time > r.chapters[i - 1].time)).toBe(true);
+  });
+
+  it('merges a marker in the first second with the start, with no Intro (ESCSUITE-496)', () => {
+    const r = buildYoutubeChapters([mk(0.4, 'Start'), mk(0.8, 'Also start'), mk(20, 'B'), mk(40, 'C')], { start: 0, end: 60 });
+    expect(r.text).toBe('0:00 Start\n0:20 B\n0:40 C');
+  });
+
+  it('separates a label that starts with a timestamp from the chapter time (ESCSUITE-496)', () => {
+    const r = buildYoutubeChapters(
+      [mk(15, '2:30 recap'), mk(30, '1:02:03'), mk(45, '12:00pm lunch'), mk(60, 'Part 2:30'), mk(75, '3 tips')],
+      { start: 0, end: 100 }
+    );
+    expect(r.text).toBe(
+      '0:00 Intro\n0:15 - 2:30 recap\n0:30 - 1:02:03\n0:45 - 12:00pm lunch\n1:00 Part 2:30\n1:15 3 tips'
+    );
+    // The title itself is the label, used as is in warnings.
+    expect(r.chapters[1].title).toBe('2:30 recap');
+  });
+
   it('keeps the list when it warns', () => {
     expect(buildYoutubeChapters([mk(1, 'X')], { start: 0, end: 5 }).text).toBe('0:00 Intro\n0:01 X');
   });
