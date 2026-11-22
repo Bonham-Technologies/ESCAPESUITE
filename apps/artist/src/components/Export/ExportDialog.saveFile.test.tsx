@@ -263,15 +263,23 @@ describe('ExportDialog: saving to a picked file (ESCSUITE-470)', () => {
       expect(exportNames()).toEqual(['Download WebM', 'Download MP4'])
     })
 
-    it('say Download in a frame from another origin, where the page may not open the picker', () => {
+    it('say Download in a frame from another origin, where the page may not open the picker, and download', async () => {
       const top = vi.spyOn(window, 'top', 'get').mockReturnValue({
         get location(): Location {
           throw domError('SecurityError')
         },
       } as unknown as Window)
       try {
+        mockExportToWebM.mockResolvedValue({ blob: new Blob([new Uint8Array([5])]), audio: true })
         render(<ExportDialog isOpen={true} onClose={vi.fn()} />)
         expect(exportNames()).toEqual(['Download WebM'])
+
+        // The click does what the words say: no picker, a download.
+        fireEvent.click(screen.getByRole('button', { name: 'Download WebM' }))
+        await waitFor(() => expect(clickedLinks).toHaveLength(1))
+        expect(clickedLinks[0].download).toBe('Test Project.webm')
+        expect(picker()).not.toHaveBeenCalled()
+        expect(mockExportToWebM.mock.calls[0][7]).toBeUndefined()
       } finally {
         top.mockRestore()
       }

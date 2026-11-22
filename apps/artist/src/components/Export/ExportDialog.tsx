@@ -47,7 +47,7 @@ import { getSetting, setSetting } from '../../core/storage';
 import { analytics } from '../../utils/analytics';
 import { sendMessage } from '../../utils/integration';
 import { downloadBlob } from '../../utils/downloadBlob';
-import { FileWriteError, canPickSaveFile, chooseSaveDestination, errorMessage, mayPickSaveFile, openFileSink } from '../../core/saveFile';
+import { FileWriteError, chooseSaveDestination, errorMessage, mayPickSaveFile, openFileSink } from '../../core/saveFile';
 import type { FileSink, SaveDestination, SaveFileType } from '../../core/saveFile';
 import { serializeCaptions } from '../../core/captions';
 import { buildYoutubeChapters } from '../../utils/youtubeChapters';
@@ -547,8 +547,11 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     // from the click itself: nothing above awaits, and the picker needs the
     // gesture's activation. A cancelled picker starts nothing. Elsewhere the
     // export downloads, as it always has, with no `await` added in front.
+    // ESCSUITE-498: decided by the same `mayPickSaveFile` as the button's
+    // words, so a button that says Export opens the picker and one that says
+    // Download downloads (a cross-origin frame goes straight to the download).
     let destination: SaveDestination = { kind: 'download' };
-    if (canPickSaveFile()) {
+    if (mayPickSaveFile()) {
       try {
         destination = await chooseSaveDestination(fileName, EXPORT_FILE_TYPES[format]);
       } catch (pickError) {
