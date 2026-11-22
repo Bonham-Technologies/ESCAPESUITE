@@ -180,7 +180,9 @@ shows an enabled "Download WebM", not an enabled "Download MP4" that silently wr
 ticket is about what the button under it promises to produce, not about hiding the user's saved
 choice. Since ESCSUITE-34 it is three-way, and **GIF short-circuits the fallback entirely**: a
 `'gif'` selection is its own effective format, so `advancedBlockedReason` is `null` whenever GIF
-is chosen and nothing can disable that button but an empty timeline.
+is chosen and nothing can disable that button but an empty timeline. Where the browser's save
+picker may open, every "Download {format}" here reads "Export {format}…" instead
+(ESCSUITE-498, `saving-to-a-picked-file.md`); the gating is the same.
 
 **The GIF controls (ESCSUITE-34).** GIF is a third radio under Advanced options, beside MP4 — not
 a fourth primary button: WebM stays the default and GIF is a deliberate choice, like MP4. Four

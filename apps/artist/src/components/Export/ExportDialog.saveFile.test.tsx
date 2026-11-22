@@ -38,7 +38,8 @@ const { mockAnalytics } = vi.hoisted(() => ({
 }))
 vi.mock('../../utils/analytics', () => ({ analytics: mockAnalytics }))
 
-const primaryExport = () => screen.getByRole('button', { name: /download webm/i })
+// ESCSUITE-498: where the picker may open, the buttons say Export, not Download.
+const primaryExport = () => screen.getByRole('button', { name: 'Export WebM…' })
 const picker = () => (window as unknown as { showSaveFilePicker: ReturnType<typeof vi.fn> }).showSaveFilePicker
 
 /** An exporter that writes `bytes` through the sink it is handed, as the muxer does. */
@@ -185,7 +186,7 @@ describe('ExportDialog: saving to a picked file (ESCSUITE-470)', () => {
     render(<ExportDialog isOpen={true} onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
     fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
-    const buttons = screen.getAllByRole('button', { name: /download mp4/i })
+    const buttons = screen.getAllByRole('button', { name: 'Export MP4…' })
     fireEvent.click(buttons[buttons.length - 1])
 
     expect(await screen.findByRole('alert')).toHaveTextContent('permission to write to it was taken away')
@@ -214,7 +215,7 @@ describe('ExportDialog: saving to a picked file (ESCSUITE-470)', () => {
     render(<ExportDialog isOpen={true} onClose={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
     fireEvent.click(screen.getByRole('radio', { name: /gif/i }))
-    const buttons = screen.getAllByRole('button', { name: /download gif/i })
+    const buttons = screen.getAllByRole('button', { name: 'Export GIF…' })
     fireEvent.click(buttons[buttons.length - 1])
 
     await waitFor(() => expect(file.bytes()).toEqual([7, 7]))
@@ -231,5 +232,49 @@ describe('ExportDialog: saving to a picked file (ESCSUITE-470)', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('permission to write to it was taken away')
     expect(mockExportToWebM).not.toHaveBeenCalled()
+  })
+
+  // ESCSUITE-498: the button says what it does.
+  describe('the export buttons\' words', () => {
+    const exportNames = () =>
+      screen.getAllByRole('button', { name: /^(Download|Export) (WebM|MP4|GIF)/ }).map((b) => b.textContent)
+
+    it('say Export, with an ellipsis, where the picker may open, and name each format', () => {
+      render(<ExportDialog isOpen={true} onClose={vi.fn()} />)
+      expect(exportNames()).toEqual(['Export WebM…'])
+
+      fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
+      fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+      expect(exportNames()).toEqual(['Export WebM…', 'Export MP4…'])
+      fireEvent.click(screen.getByRole('radio', { name: /gif/i }))
+      expect(exportNames()).toEqual(['Export WebM…', 'Export GIF…'])
+      // The accessible name is the words on the button.
+      expect(screen.getByRole('button', { name: 'Export GIF…' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /download (webm|mp4|gif)/i })).not.toBeInTheDocument()
+    })
+
+    it('say Download where there is no picker', () => {
+      uninstall()
+      uninstall = () => {}
+      render(<ExportDialog isOpen={true} onClose={vi.fn()} />)
+      fireEvent.click(screen.getByRole('button', { name: /advanced options/i }))
+      fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+
+      expect(exportNames()).toEqual(['Download WebM', 'Download MP4'])
+    })
+
+    it('say Download in a frame from another origin, where the page may not open the picker', () => {
+      const top = vi.spyOn(window, 'top', 'get').mockReturnValue({
+        get location(): Location {
+          throw domError('SecurityError')
+        },
+      } as unknown as Window)
+      try {
+        render(<ExportDialog isOpen={true} onClose={vi.fn()} />)
+        expect(exportNames()).toEqual(['Download WebM'])
+      } finally {
+        top.mockRestore()
+      }
+    })
   })
 })

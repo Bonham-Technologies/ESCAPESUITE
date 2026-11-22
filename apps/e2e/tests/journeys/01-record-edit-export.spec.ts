@@ -4,6 +4,7 @@ import { mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-moc
 import { getRecordCount } from '../../utils/indexeddb'
 import { waitForAppReady } from '../../utils/ready'
 import { watchConsoleForAnnotation } from '../../utils/consoleAnnotation'
+import { exportButtonName } from '../../utils/artist'
 
 /**
  * Journey: Record (ESCAPECRAFT) → hand off → Edit (ESCAPEARTIST) → Export
@@ -175,7 +176,7 @@ test.describe('Journey: Record, Edit, Export', () => {
       await expect(exportButton).toBeEnabled()
       await exportButton.click()
 
-      const downloadWebM = artist.getByRole('button', { name: /download webm/i })
+      const downloadWebM = artist.getByRole('button', { name: exportButtonName('webm') })
       await expect(downloadWebM).toBeVisible({ timeout: 15_000 })
 
       const downloadPromise = artist.waitForEvent('download', { timeout: 120_000 })

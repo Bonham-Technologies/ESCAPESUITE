@@ -2,7 +2,7 @@ import { dirname, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { statSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
-import { ARTIST_URL, importMediaAndAddToTimeline, openExportDialog } from '../../utils/artist'
+import { ARTIST_URL, importMediaAndAddToTimeline, openExportDialog, exportButtonName } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
 /**
@@ -132,7 +132,7 @@ async function exportWebM(page: Page): Promise<{ size: number } | { failure: str
   const failure = failed.waitFor({ state: 'visible', timeout: 120_000 }).then(() => failed.innerText())
   download.catch(() => {})
   failure.catch(() => {})
-  await page.getByRole('button', { name: /download webm/i }).click()
+  await page.getByRole('button', { name: exportButtonName('webm') }).click()
   return Promise.race([
     download.then(async (d) => ({ size: statSync((await d.path())!).size })),
     failure.then((text) => ({ failure: text })),

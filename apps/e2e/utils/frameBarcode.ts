@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { expect, type Page } from '@playwright/test'
+import { exportButtonName } from './artist'
 
 /**
  * Helpers for the frame-barcode export specs (ESCSUITE-454, ESCSUITE-495).
@@ -90,7 +91,7 @@ export async function exportWebmAtProjectResolution(page: Page): Promise<Buffer>
   await page.locator('select').filter({ has: page.locator('option[value="480p"]') }).selectOption('project')
   const download = page.waitForEvent('download', { timeout: 120_000 })
   // The Advanced panel's button sits after the primary "Download WebM" in the DOM.
-  await page.getByRole('button', { name: 'Download WebM' }).last().click()
+  await page.getByRole('button', { name: exportButtonName('webm') }).last().click()
   return readFileSync(await (await download).path())
 }
 

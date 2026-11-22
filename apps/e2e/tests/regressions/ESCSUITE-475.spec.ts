@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test, expect, type Page } from '@playwright/test'
-import { ARTIST_URL, importMediaAndAddToTimeline, openExportAdvancedOptions, openExportDialog } from '../../utils/artist'
+import { ARTIST_URL, importMediaAndAddToTimeline, openExportAdvancedOptions, openExportDialog, exportButtonName } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
 /**
@@ -142,7 +142,7 @@ async function exportWebm(page: Page): Promise<Buffer> {
   await page.getByRole('radio', { name: /WebM/ }).check()
   await page.locator('select').filter({ has: page.locator('option[value="480p"]') }).selectOption('project')
   const download = page.waitForEvent('download', { timeout: 120_000 })
-  await page.getByRole('button', { name: 'Download WebM' }).last().click()
+  await page.getByRole('button', { name: exportButtonName('webm') }).last().click()
   return readFileSync(await (await download).path())
 }
 
