@@ -36,8 +36,9 @@ what is already stored.
   every VP9 key frame header's `color_space` (`fixVP9ColorSpace`) from the matrix of the decoder
   configuration it was handed. The remux hands it the source track's, whose matrix is the Colour
   element's where that names one, and otherwise the one the first key frame header implies. So up
-  to 1.65 the header took the Colour element's matrix where VP9 has a code for it (BT.709 2,
-  BT.470BG 1, SMPTE 170M 3, RGB 7) and 0, "unknown", where it has none (BT.2020); a file with no
+  to 1.65 the header took the Colour element's matrix where Mediabunny's table had a code for it
+  (BT.709 2, BT.470BG 1, SMPTE 170M 3, RGB 7) and 0, "unknown", for any other matrix (BT.2020,
+  SMPTE 240M), although VP9 has codes for those; a file with no
   Colour element kept its header, except that a BT.2020 header (5) became 0. The remux does not
   restore that — the export does, for frames it encodes (`webm-export-reliability.md`,
   ESCSUITE-284) — so a remuxed take's headers stay as its encoder wrote them (an ESCAPECRAFT
@@ -106,7 +107,7 @@ after the repair as before it, to the code value.
   browser offers it, so a Firefox that gains VP9 is measured on its next run. Each file is
   imported into ARTIST and read four ways: by a plain `<video>` and by the preview canvas, each
   before the repair (the stored row's bytes put back and the session restored) and after it. The
-  spec checks that the repair kept every video packet byte for byte and kept the Colour element.
+  spec checks that the repair kept every video packet byte for byte and kept the Colour element's matrix.
   It fails if any reading after the repair is more than 2/255 from the one before.
 - **Result**, as mean / max channel difference from the drawn RGB, out of 255. Each "before"
   figure is the same as its "after" figure, `<video>` and preview alike:
@@ -119,7 +120,7 @@ after the repair as before it, to the code value.
   The 9.04 / 35 is **Firefox's decoder, not the repair**: it is there before the repair too.
   Firefox reads Chromium's full-range BT.709 VP9 as limited-range BT.601, which fits its reading
   to within a mean of 1.07. The drawn (228,61,99) reads (226,31,97). Not fixed here; it is a
-  separate finding about Firefox decoding a full-range VP9 file.
+  separate finding about Firefox decoding a full-range VP9 file, tracked as ESCSUITE-507.
 - **Mediabunny 1.65 against 1.66, run over real bytes**: Chromium's recording and variants of it,
   remuxed in Node through each version's `EncodedPacketSink` and `EncodedVideoPacketSource`
   (the 1.65 package fetched for the comparison, not a dependency). Results under 1.65: header 0
