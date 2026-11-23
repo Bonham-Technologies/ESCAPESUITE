@@ -3,7 +3,8 @@ import { expect, type Page } from '@playwright/test'
 import { exportButtonName } from './artist'
 
 /**
- * Helpers for the frame-barcode export specs (ESCSUITE-454, ESCSUITE-495).
+ * Helpers for the frame-barcode export specs (ESCSUITE-454, ESCSUITE-495,
+ * ESCSUITE-505).
  *
  * Their sources, under `fixtures/presented-frame/`, show each frame's own
  * index as an 8-bit barcode: eight full-height stripes, stripe k from the left
@@ -47,11 +48,16 @@ function getProject(page: Page): Promise<ProjectShape> {
   )
 }
 
-/** One piece of the source on the timeline: its in point, length and place, in seconds. */
+/**
+ * One piece of the source on the timeline: its in point, length and place, in
+ * seconds, and its speed (1 when left out, ESCSUITE-471). `duration` is the
+ * piece's length on the timeline; it covers `duration * speed` of the source.
+ */
 export interface Piece {
   startTime: number
   duration: number
   timelinePosition: number
+  speed?: number
 }
 
 /**
@@ -68,13 +74,14 @@ export async function cutIntoPieces(
 ): Promise<void> {
   const project = await getProject(page)
   const [clip] = project.timeline.clips
-  project.timeline.clips = pieces.map(({ startTime, duration, timelinePosition }, k) => ({
+  project.timeline.clips = pieces.map(({ startTime, duration, timelinePosition, speed }, k) => ({
     ...clip,
     id: `${clip.id}-piece-${k}`,
     startTime,
-    endTime: startTime + duration,
+    endTime: startTime + duration * (speed ?? 1),
     duration,
     timelinePosition,
+    ...(speed === undefined ? {} : { speed }),
   }))
   project.timeline.duration = duration
   project.resolution = { width, height }
