@@ -77,7 +77,7 @@ describe('applyRouteHead', () => {
     const out = applyRouteHead(indexHtml, '/privacy')
     const body = (html: string) => html.slice(html.indexOf('<body>'))
     expect(body(out)).toBe(body(indexHtml))
-    expect(out).toContain('<meta property="og:image" content="https://escapesuite.io/og.png" />')
+    expect(out).toContain('<meta property="og:image" content="https://escapesuite.tech/og.png" />')
   })
 
   it('escapes HTML in the values it writes', () => {
@@ -92,7 +92,7 @@ describe('applyRouteHead', () => {
     expect(applyRouteHead(minimal, '/terms')).toBe(
       '<head><title>Terms of Service — ESCAPE Suite</title>' +
         `<meta name="description" content="${ROUTE_META['/terms'].description}" />` +
-        '<link rel="canonical" href="https://escapesuite.io/terms" /></head>'
+        '<link rel="canonical" href="https://escapesuite.tech/terms" /></head>'
     )
   })
 
@@ -144,7 +144,7 @@ describe('applyNotFoundHead (ESCSUITE-489)', () => {
     const out = applyNotFoundHead(indexHtml)
     const body = (html: string) => html.slice(html.indexOf('<body>'))
     expect(body(out)).toBe(body(indexHtml))
-    expect(out).toContain('<meta property="og:image" content="https://escapesuite.io/og.png" />')
+    expect(out).toContain('<meta property="og:image" content="https://escapesuite.tech/og.png" />')
     expect(out).not.toMatch(/\n\s*\n\s*<meta name="theme-color"/)
   })
 

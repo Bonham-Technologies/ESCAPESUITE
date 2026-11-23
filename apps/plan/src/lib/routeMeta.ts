@@ -19,7 +19,7 @@
  * must agree on it or Search Console reports duplicate/alternate-canonical
  * pages.
  */
-export const SITE_URL = 'https://escapesuite.io'
+export const SITE_URL = 'https://escapesuite.tech'
 
 export interface RouteMeta {
   title: string
