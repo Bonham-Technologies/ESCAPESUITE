@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v37. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v40. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: registry and repo runs (background: bonham-ops `docs/ops/one-project.md`)
 
 ## Registry
@@ -38,7 +38,7 @@ working in that repo's checkout has done them and never attaches again.
    without them (it gets no vendored policy) works under bonham-ops's rules.
 4. Run every git command as `git -C <checkout>`, and every `gh api`, verify and scanner
    command from inside the checkout, so `{owner}/{repo}` names that repo. Install its
-   dependencies first, as its `CLAUDE.md` says. Push with `git -c push.negotiate=true`;
+   dependencies first, as its `CLAUDE.md` says, and run its prep command, if it names one, before verify. Push with `git -c push.negotiate=true`;
    fetch `main` with a bounded `--depth` before update-branch work.
 5. The Jira key, Confluence record and control-panel row (by `Jira`) are the entry's.
 6. If the attach, the clone or the first push fails, stop: say exactly what failed in the

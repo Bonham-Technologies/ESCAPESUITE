@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v37. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v40. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot policy
 
 This repository is on autopilot. Claude finds improvements, files them, builds them and
@@ -7,7 +7,7 @@ is in a great state. The owner is involved only where it matters: product decisi
 risky merges, and reverts.
 
 Jira project: **ESCSUITE**. Confluence record: **ESCAPESUITE** in space `OPS`.
-Verify command: see `CLAUDE.md`.
+Verify command, and any prep command run before it (BORG-137): see `CLAUDE.md`, or `## Verify command` in `autopilot.local.md`.
 
 ## Roles
 
@@ -218,7 +218,7 @@ At the start of every run:
 
 ## Always
 
-- Never push to `main`; never force-push a branch you didn't create; never merge, or turn on auto-merge for, `ap-decision` work or anything labelled `needs-owner`; never write to a `tracked` repo (`repos.md`).
+- Never push to `main`; never force-push a branch you didn't create; never merge, or turn on auto-merge for, `ap-decision` work or anything labelled `needs-owner`, and before you label a PR `needs-owner` turn its auto-merge off (`disable_pr_auto_merge`) and label it only once `auto_merge` reads null (if you can't, leave it unlabelled and say so on the PR), so auto-merge on a `needs-owner` PR is always the owner's own merge decision, which **Keep fresh** only brings up to date; never write to a `tracked` repo (`repos.md`).
 - Merge only on a **fresh green**: `ci-status` passed on the PR's head, and `gh api repos/{owner}/{repo}/compare/main...<head sha> --jq .behind_by` is 0. If it's behind, `gh api -X PUT repos/{owner}/{repo}/pulls/{n}/update-branch` (a merge of `main`, never a rebase) and wait for the new run.
   This holds for every merge, a refresh PR's or one the owner asks a thread to make, whoever's go-ahead it has. Recheck the next PR after each merge. Auto-merge (builder step 6) needs `main`'s ruleset to require a strict `ci-status`: GitHub then merges it on a fresh green alone.
 - Never build or relabel `ap-decision`, `ap-watch` or `needs-operator` tickets. The exceptions are adding the `ap-asked` marker, and a thread started from the Project conversation because the owner approved or rejected a named ticket there.
