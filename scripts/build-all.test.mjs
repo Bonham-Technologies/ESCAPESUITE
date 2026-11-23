@@ -248,8 +248,8 @@ test('verifyDistLayout: control — passes when the referenced ARTIST decode wor
 const homeHead =
   '<head><title>ESCAPE Suite — Home</title>' +
   '<meta name="description" content="The home page." />' +
-  '<link rel="canonical" href="https://escapesuite.io/" />' +
-  '<meta property="og:url" content="https://escapesuite.io/" /></head>';
+  '<link rel="canonical" href="https://escapesuite.tech/" />' +
+  '<meta property="og:url" content="https://escapesuite.tech/" /></head>';
 const notFoundHead =
   '<head><title>Page not found — ESCAPE Suite</title>' +
   '<meta name="description" content="This page does not exist." />' +
@@ -274,7 +274,7 @@ test('notFoundHeadProblems: names each problem on its own', () => {
     'has no <meta name="robots" content="noindex">',
   ]);
   assert.deepEqual(
-    notFoundHeadProblems(notFoundHead.replace('</head>', '<meta property="og:url" content="https://escapesuite.io/x" /></head>'), homeHead),
+    notFoundHeadProblems(notFoundHead.replace('</head>', '<meta property="og:url" content="https://escapesuite.tech/x" /></head>'), homeHead),
     ['has an og:url']
   );
 });

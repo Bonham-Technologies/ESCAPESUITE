@@ -18,7 +18,7 @@ import { waitForAppReady } from '../../utils/ready'
  * resolves requests from `vercel.json` itself.
  */
 const BASE = 'http://localhost:5190'
-const ORIGIN = 'https://escapesuite.io'
+const ORIGIN = 'https://escapesuite.tech'
 
 function decodeEntities(text: string): string {
   return text

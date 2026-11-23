@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-ESCAPE Suite is distributed as a hosted static site ([escapesuite.io](https://escapesuite.io))
+ESCAPE Suite is distributed as a hosted static site ([escapesuite.tech](https://escapesuite.tech))
 and as offline single-file builds attached to
 [GitHub Releases](https://github.com/Bonham-Technologies/ESCAPESUITE/releases).
 Only the latest release and the current `main` branch receive security fixes.

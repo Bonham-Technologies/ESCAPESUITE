@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://escapesuite.io/sitemap.xml
+Sitemap: https://escapesuite.tech/sitemap.xml

@@ -15,7 +15,7 @@ creation tools that run entirely in the browser. The suite consists of:
 **Key Value Proposition:**
 - Lightning fast (local hardware processing)
 - 100% private — all processing happens on-device, no cloud uploads, ever
-- Hosted free at escapesuite.io with no account required
+- Hosted free at escapesuite.tech with no account required
 - Offline single-file builds available from GitHub Releases for fully air-gapped use
 - No installation required (browser-based)
 
