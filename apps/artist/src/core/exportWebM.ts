@@ -407,6 +407,7 @@ export async function exportToWebM(
       projectSize,
       outputSize,
       drawOptions,
+      frameRate,
       log,
     });
 

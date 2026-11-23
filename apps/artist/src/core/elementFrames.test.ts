@@ -329,6 +329,7 @@ describe('createFrameComposer', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
+      frameRate: 30,
     })
 
     await composeFrame(0)
@@ -366,6 +367,7 @@ describe('createFrameComposer', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
+      frameRate: 30,
     })
     const seeksBefore = media.seeks.length
 
@@ -398,6 +400,7 @@ describe('createFrameComposer', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
+      frameRate: 30,
     })
     const seeksBefore = media.seeks.length
 
@@ -424,6 +427,7 @@ describe('createFrameComposer', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
+      frameRate: 30,
     })
 
     await composeFrame(0.5)
@@ -454,6 +458,7 @@ describe('createFrameComposer', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
+      frameRate: 30,
     })
 
     await composeFrame(0)
@@ -497,6 +502,7 @@ describe('createFrameComposer', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
+      frameRate: 30,
     })
 
     await composeFrame(0)
@@ -526,6 +532,7 @@ describe('createFrameComposer', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
+      frameRate: 30,
     })
 
     // t = 5 is past the clip's one second, so nothing is active and the
@@ -563,6 +570,7 @@ describe('createFrameComposer readiness wait', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
+      frameRate: 30,
     })
     return { composeFrame, sources }
   }
@@ -644,6 +652,7 @@ describe('createFrameComposer seek wait', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
+      frameRate: 30,
     })
     return { composeFrame, video: sources.videoElements.get('v1')! }
   }
@@ -828,6 +837,7 @@ describe('createFrameComposer with two live clips of one source', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
+      frameRate: 30,
     })
     return { composeFrame, sources, playbackState, ctx }
   }
@@ -1011,6 +1021,7 @@ describe('createFrameComposer with two live clips of one source', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
+      frameRate: 30,
     })
 
     await composeFrame(0)
@@ -1044,6 +1055,7 @@ describe('createFrameComposer seek wedge', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
+      frameRate: 30,
       log: (phase, detail) => log.push({ phase, detail, timestamp: 0 }),
     })
     return { composeFrame, ctx, sources, log }
@@ -1286,6 +1298,7 @@ describe('createFrameComposer seek wedge', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
+      frameRate: 30,
     })
 
     await frame(composeFrame, 0)
@@ -1409,6 +1422,7 @@ describe('createFrameComposer on a slowed clip of a high-rate source (ESCSUITE-5
         projectSize: PROJECT,
         outputSize: PROJECT,
         drawOptions: { filterScale: 1 },
+        frameRate: 30,
       })
       const video = sources.videoElements.get('v1')!
 
@@ -1423,6 +1437,40 @@ describe('createFrameComposer on a slowed clip of a high-rate source (ESCSUITE-5
       releaseElementSources(sources)
     }
     expect(wrong).toEqual([])
+  })
+
+  // The element exporters' old window, 0.4 of an output frame (13.3 ms at 30
+  // fps), stays as a ceiling: half a frame of a source recorded at 30 fps is
+  // 16.7 ms, and inside that band only the ideal 30 fps grid would decide. An
+  // ESCAPECRAFT take (capture-time timestamps) or a 60 fps file recorded as 30
+  // shows a different picture on every request of a 0.5× clip, so each is
+  // seeked, as before ESCSUITE-505 — without the ceiling every other one was
+  // skipped.
+  it('seeks every request of a 0.5× clip of a source recorded at 30 fps, as before', async () => {
+    await store('v1')
+    const clips = [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1, speed: 0.5 })]
+    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1', frameRate: 30 })]), [])
+    const playbackState = rewindElementSources(sources)
+    const { canvas, ctx } = outputCanvas()
+    const composeFrame = createFrameComposer({
+      ctx: ctx as unknown as CanvasRenderingContext2D,
+      canvas,
+      clips,
+      tracks: [makeTrack()],
+      sources,
+      playbackState,
+      projectSize: PROJECT,
+      outputSize: PROJECT,
+      drawOptions: { filterScale: 1 },
+      frameRate: 30,
+    })
+    const seeksBefore = media.seeks.length
+
+    for (let n = 0; n < 12; n++) await composeFrame(n / 30)
+
+    // The rewound element sits at 0, so the request at 0 needs no seek.
+    const expected = Array.from({ length: 11 }, (_, i) => elementSeekTarget((i + 1) / 60))
+    expect(media.seeks.slice(seeksBefore)).toEqual(expected)
   })
 
   it('still skips the seeks that would show the same frame: once per source frame at 0.25× of 60 fps', async () => {
@@ -1441,6 +1489,7 @@ describe('createFrameComposer on a slowed clip of a high-rate source (ESCSUITE-5
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
+      frameRate: 30,
     })
     const seeksBefore = media.seeks.length
 

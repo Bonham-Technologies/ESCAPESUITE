@@ -257,12 +257,17 @@ interface SyncOutcome {
 /**
  * Sync a video to a target time. Seeks to just past the target
  * (`elementSeekTarget`, ESCSUITE-265) for frame-accurate export, skipping the
- * seek only when the element already shows the frame of the source the seek
- * would (`elementShowsFrameFor`, ESCSUITE-505): the same frame of the source's
- * own rate, and within half of one. The window used to be 0.4 of an *output*
- * frame whatever the clip's speed, so a slowed clip of a high-rate source —
- * whose requests are closer together in source time than an output frame —
- * skipped seeks to the next source frame and repeated the one before.
+ * seek only when the element is within (a little under) half an output frame
+ * of it **and** already shows the frame of the source the seek would
+ * (`elementShowsFrameFor`, ESCSUITE-505): the same frame of the source's own
+ * rate, and within half of one. The output-frame window alone, whatever the
+ * clip's speed, let a slowed clip of a high-rate source — whose requests are
+ * closer together in source time than an output frame — skip seeks to the next
+ * source frame and repeat the one before. It stays as a ceiling: half a frame
+ * of a source recorded at 30 fps is wider than 0.4 of a 30 fps output frame,
+ * and inside that band only the source's ideal frame grid would decide, which
+ * is wrong for an ESCAPECRAFT take (capture-time timestamps) or a 60 fps file
+ * recorded as 30 — a 0.5x clip of one would repeat every other frame.
  *
  * Resolves to what the request did: above all whether a seek it issued landed
  * ('seeked' fired) — what the wedge count reads alongside the element's state
@@ -272,6 +277,7 @@ interface SyncOutcome {
 async function syncVideoToTime(
   video: HTMLVideoElement,
   targetTime: number,
+  outputFrameRate: number,
   sourceFrameRate: number | undefined
 ): Promise<SyncOutcome> {
   const started = performance.now();
@@ -281,7 +287,8 @@ async function syncVideoToTime(
   // it: Chromium can fire 'seeked' while the element still paints the frame
   // from before the seek (ESCSUITE-454, `presentedFrame.ts`).
   let presented: PresentedFrameWatch | undefined;
-  if (!elementShowsFrameFor(video.currentTime, targetTime, sourceFrameRate)) {
+  const withinOutputWindow = Math.abs(video.currentTime - targetTime) <= (1 / outputFrameRate) * 0.4;
+  if (!withinOutputWindow || !elementShowsFrameFor(video.currentTime, targetTime, sourceFrameRate)) {
     issued = true;
     presented = watchPresentedFrame(video);
     // Just past the target: a target on a frame's exact start would otherwise
@@ -368,6 +375,12 @@ export interface FrameComposerParams {
   outputSize: PixelSize;
   drawOptions: MediaDrawOptions;
   /**
+   * Output frame rate. A seek is skipped only within a little under half an
+   * output frame of the element's time, and then only on the source frame it
+   * already shows (ESCSUITE-505).
+   */
+  frameRate: number;
+  /**
    * The export's diagnostic log (ESCSUITE-412). Every seek request that did
    * not land within its 500 ms wait, or that counted toward a wedge, is
    * written here with its target, `seeking`, `readyState`, whether it landed
@@ -404,6 +417,7 @@ export function createFrameComposer({
   projectSize,
   outputSize,
   drawOptions,
+  frameRate,
   log = () => {},
 }: FrameComposerParams): FrameComposer {
   const { videoElements, imageElements, extraVideoElements, sourceNames, frameRates } = sources;
@@ -439,7 +453,7 @@ export function createFrameComposer({
     sourceTime: number
   ): Promise<string | undefined> => {
     const atStart = wedgeCountAtStart(wedgedSeeks.get(video) ?? 0, video);
-    const outcome = await syncVideoToTime(video, sourceTime, frameRates.get(sourceId));
+    const outcome = await syncVideoToTime(video, sourceTime, frameRate, frameRates.get(sourceId));
     const wedged = nextWedgeCount(atStart, video, outcome.landed);
     wedgedSeeks.set(video, wedged);
     if ((outcome.issued && !outcome.landedPromptly) || wedged > atStart) {

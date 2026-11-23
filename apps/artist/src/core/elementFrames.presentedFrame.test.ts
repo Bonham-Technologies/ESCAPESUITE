@@ -65,6 +65,7 @@ function composerOver(video: PresentingVideo) {
     projectSize: PROJECT,
     outputSize: PROJECT,
     drawOptions: { filterScale: 1 },
+    frameRate: 30,
   })
   return { composeFrame, drawn }
 }

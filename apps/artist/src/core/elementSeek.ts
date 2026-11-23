@@ -93,14 +93,16 @@ function usableFrameRate(frameRate: number | undefined): number {
  *   fps source moves on a frame every output frame, inside the old 0.4-output-frame
  *   window, and even half a source frame straddles a frame start when a trim
  *   puts the requests off the frame grid.
- * - **Within half a frame** ({@link seekToleranceFor}): the window both paths
- *   had, kept as a ceiling for a source whose frames are not on that grid (an
+ * - **Within half a frame** ({@link seekToleranceFor}): the MP4 path's window,
+ *   kept as a ceiling for a source whose frames are not on that grid (an
  *   ESCAPECRAFT take's timestamps are its capture times) or whose rate is a
  *   placeholder.
  *
  * Either one failing seeks, so this never skips a seek the half-frame window
  * would have issued, and for a source on its rate's grid it never skips a seek
- * to a different frame, whatever the clip's speed.
+ * to a different frame, whatever the clip's speed. The element exporters keep
+ * their own, narrower ceiling on top — 0.4 of an output frame, which half a
+ * frame of a source recorded at 30 fps exceeds — in `syncVideoToTime`.
  */
 export function elementShowsFrameFor(
   currentTime: number,
