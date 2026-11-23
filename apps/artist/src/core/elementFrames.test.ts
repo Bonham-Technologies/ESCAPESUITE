@@ -354,7 +354,7 @@ describe('createFrameComposer', () => {
   it('skips a seek to the frame of the source the element already shows', async () => {
     await store('v1')
     const clips = [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1 })]
-    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]), [])
+    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1', frameRateSource: 'measured' })]), [])
     const playbackState = rewindElementSources(sources)
     const { canvas, ctx } = outputCanvas()
     const composeFrame = createFrameComposer({
@@ -371,8 +371,8 @@ describe('createFrameComposer', () => {
     })
     const seeksBefore = media.seeks.length
 
-    // The element sits at 0 after the rewind, on frame 0 of the 30 fps source
-    // (ESCSUITE-505, `elementShowsFrameFor`): t = 0.01 is still frame 0 and
+    // The element sits at 0 after the rewind, on frame 0 of the 30 fps source,
+    // a measured rate (ESCSUITE-505, `elementShowsFrameFor`): t = 0.01 is still frame 0 and
     // reuses the position it has, t = 0.04 is frame 1 and does not.
     await composeFrame(0.01)
     expect(media.seeks).toHaveLength(seeksBefore)
@@ -1409,7 +1409,11 @@ describe('createFrameComposer on a slowed clip of a high-rate source (ESCSUITE-5
     const wrong: string[] = []
     for (const inPoint of inPoints(rate)) {
       const clips = [makeClip({ sourceVideoId: 'v1', startTime: inPoint, duration: 1, endTime: inPoint + 1, speed })]
-      const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1', frameRate: rate })]), [])
+      const sources = await loadElementSources(
+        clips,
+        sourceMapOf([makeSourceVideo({ id: 'v1', frameRate: rate, frameRateSource: 'measured' })]),
+        []
+      )
       const playbackState = rewindElementSources(sources)
       const { canvas, ctx } = outputCanvas()
       const composeFrame = createFrameComposer({
@@ -1449,7 +1453,12 @@ describe('createFrameComposer on a slowed clip of a high-rate source (ESCSUITE-5
   it('seeks every request of a 0.5× clip of a source recorded at 30 fps, as before', async () => {
     await store('v1')
     const clips = [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1, speed: 0.5 })]
-    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1', frameRate: 30 })]), [])
+    // An ESCAPECRAFT take: its 30 is the rate it was configured to record at.
+    const sources = await loadElementSources(
+      clips,
+      sourceMapOf([makeSourceVideo({ id: 'v1', frameRate: 30, frameRateSource: 'configured' })]),
+      []
+    )
     const playbackState = rewindElementSources(sources)
     const { canvas, ctx } = outputCanvas()
     const composeFrame = createFrameComposer({
@@ -1473,10 +1482,59 @@ describe('createFrameComposer on a slowed clip of a high-rate source (ESCSUITE-5
     expect(media.seeks.slice(seeksBefore)).toEqual(expected)
   })
 
+  // Firefox's imports are never measured (ESCSUITE-327): every video is
+  // stored at 30, `frameRateSource: 'assumed'`. A grid at that placeholder rate
+  // says nothing about where a 50 fps file's frames start, and deciding on it
+  // skipped seeks to the next frame exactly as the old window did (the e2e
+  // spec's 29 wrong frames in Firefox).
+  it.each([0.25, 0.4])(
+    'shows the requested frame of a 50 fps file stored at an assumed 30 fps, at %s×, on every output frame',
+    async (speed) => {
+      await store('v1')
+      const wrong: string[] = []
+      for (const inPoint of [0.2, 0.21, 1.21]) {
+        const clips = [makeClip({ sourceVideoId: 'v1', startTime: inPoint, duration: 1, endTime: inPoint + speed, speed })]
+        const sources = await loadElementSources(
+          clips,
+          sourceMapOf([makeSourceVideo({ id: 'v1', frameRate: 30, frameRateSource: 'assumed' })]),
+          []
+        )
+        const playbackState = rewindElementSources(sources)
+        const { canvas, ctx } = outputCanvas()
+        const composeFrame = createFrameComposer({
+          ctx: ctx as unknown as CanvasRenderingContext2D,
+          canvas,
+          clips,
+          tracks: [makeTrack()],
+          sources,
+          playbackState,
+          projectSize: PROJECT,
+          outputSize: PROJECT,
+          drawOptions: { filterScale: 1 },
+          frameRate: 30,
+        })
+        const video = sources.videoElements.get('v1')!
+
+        for (let n = 0; n < 30; n++) {
+          await composeFrame(n / 30)
+          const wanted = frameAt(elementSeekTarget(inPoint + (n / 30) * speed), 50)
+          const shown = frameAt(video.currentTime, 50)
+          if (shown !== wanted) wrong.push(`in ${inPoint} frame ${n}: showed ${shown}, wanted ${wanted}`)
+        }
+        releaseElementSources(sources)
+      }
+      expect(wrong).toEqual([])
+    }
+  )
+
   it('still skips the seeks that would show the same frame: once per source frame at 0.25× of 60 fps', async () => {
     await store('v1')
     const clips = [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1, speed: 0.25 })]
-    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1', frameRate: 60 })]), [])
+    const sources = await loadElementSources(
+      clips,
+      sourceMapOf([makeSourceVideo({ id: 'v1', frameRate: 60, frameRateSource: 'measured' })]),
+      []
+    )
     const playbackState = rewindElementSources(sources)
     const { canvas, ctx } = outputCanvas()
     const composeFrame = createFrameComposer({

@@ -385,8 +385,10 @@
   holds. The composer takes the output `frameRate` (30 for WebM, 10/15/20 for GIF): it
   skips a seek only within 0.4 of a frame of it, and since ESCSUITE-505 only when the
   element also shows the frame the seek would, at the source's own rate
-  (`ElementSources.frameRates`, filled by `loadElementSources` from `SourceVideo.frameRate`;
-  `elementShowsFrameFor` in `elementSeek.ts`).
+  (`ElementSources.frameRates`, filled by `loadElementSources` from `SourceVideo.frameRate`
+  when its `frameRateSource` is `'measured'` or `'configured'`; `elementShowsFrameFor` in
+  `elementSeek.ts`). A source whose rate was only assumed (every Firefox import) skips a
+  seek only when the element already sits at the request (`elementSitsAt`).
   `exportMP4.ts` is deliberately
   **not** a caller: it decodes through `videoDecodeManager.ts` / `frameSource.ts` and draws
   `VideoFrame`s, so it shares `canvasRenderer.ts` but not this. The extraction is a pure

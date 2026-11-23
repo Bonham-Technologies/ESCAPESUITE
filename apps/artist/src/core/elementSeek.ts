@@ -113,3 +113,19 @@ export function elementShowsFrameFor(
   const rate = usableFrameRate(frameRate);
   return Math.floor(currentTime * rate) === Math.floor(elementSeekTarget(time) * rate);
 }
+
+/**
+ * Whether a `<video>` sitting at `currentTime` is where a seek for `time` would
+ * put it — at the request itself or at its seek target, or between the two —
+ * so it shows that request's frame whatever the source's frame rate
+ * (ESCSUITE-505). The element exporters' whole skip decision for a source
+ * whose rate nobody measured (`frameRateSource` `'assumed'` or absent, every
+ * import in Firefox, ESCSUITE-327): a placeholder rate's grid says nothing
+ * about where the file's frames start, so only a request the element already
+ * answered — the same time asked again, or the first frame at 0 over the
+ * rewound element — skips its seek. A microsecond either side absorbs an
+ * engine that reads `currentTime` back truncated to whole microseconds.
+ */
+export function elementSitsAt(currentTime: number, time: number): boolean {
+  return currentTime >= time - 1e-6 && currentTime <= elementSeekTarget(time) + 1e-6;
+}

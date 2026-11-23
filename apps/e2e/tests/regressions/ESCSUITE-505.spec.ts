@@ -18,8 +18,12 @@ import { waitForAppReady } from '../../utils/ready'
  * own rate (`elementShowsFrameFor`, `apps/artist/src/core/elementSeek.ts`).
  *
  * The source, `fixtures/presented-frame/frame-barcode.webm`, is ESCSUITE-454's
- * 50 fps barcode: each frame shows its own index. Its rate is measured at
- * import (ESCSUITE-276), so the export decides at 50 fps. The timeline holds
+ * 50 fps barcode: each frame shows its own index. In Chromium its rate is
+ * measured at import (ESCSUITE-276), so the export decides at 50 fps. Firefox's
+ * imports are never measured (ESCSUITE-327): the source is stored at an
+ * assumed 30, whose grid says nothing about where its frames start, so the
+ * export seeks every request that is not the one the element already answered
+ * (`elementSitsAt`). The timeline holds
  * four one-second pieces of it: two at 0.25x and two at 0.4x, one of each
  * starting on a source frame's start and one half way into a frame, so the
  * requests fall at many places inside the source's frames. None falls in the
@@ -29,7 +33,10 @@ import { waitForAppReady } from '../../utils/ready'
  * Measured locally (Chromium headless shell 159, 2026-11-23): with the old
  * window, 3 of 3 runs failed with the same 30 wrong frames, each the source
  * frame before the one the timeline puts there; with the fix, 3 of 3 runs
- * passed. Like ESCSUITE-495's, the failure is deterministic.
+ * passed. In Firefox 159 the old window wrote the same 30, and deciding on the
+ * assumed 30 fps grid 29 (CI's e2e-cross-browser job too); with an assumed rate
+ * judged by `elementSitsAt` alone, 3 of 3 runs passed. Like ESCSUITE-495's, the
+ * failure is deterministic.
  *
  * WebKit's Linux port paints a `<video>` outside the document as black, so the
  * case skips there where the probe sees that, as ESCSUITE-454's does.

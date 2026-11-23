@@ -470,6 +470,9 @@ describe('exportToWebM rendering', () => {
   it('seeks a sped clip to the source time its speed puts under each frame (ESCSUITE-471)', async () => {
     await run({
       clips: [makeClip({ startTime: 2, duration: CLIP_DURATION, endTime: 2 + CLIP_DURATION / 2, speed: 0.5 })],
+      // A rate something stands behind (an ESCAPECRAFT take's configured 30):
+      // an assumed one is never judged by its grid at all.
+      sources: [makeSourceVideo({ width: 640, height: 360, frameRateSource: 'configured' })],
     })
 
     // Half a 30 fps source frame per timeline frame. Every request is seeked,
@@ -483,7 +486,7 @@ describe('exportToWebM rendering', () => {
   it('seeks a sped clip of a 60 fps source on every new source frame (ESCSUITE-471, ESCSUITE-505)', async () => {
     await run({
       clips: [makeClip({ startTime: 2, duration: CLIP_DURATION, endTime: 2 + CLIP_DURATION / 2, speed: 0.5 })],
-      sources: [makeSourceVideo({ width: 640, height: 360, frameRate: 60 })],
+      sources: [makeSourceVideo({ width: 640, height: 360, frameRate: 60, frameRateSource: 'measured' })],
     })
 
     expect(media.seeks.slice(1)).toEqual([0, 1, 2, 3, 4, 5].map((i) => elementSeekTarget(2 + i / 60)))

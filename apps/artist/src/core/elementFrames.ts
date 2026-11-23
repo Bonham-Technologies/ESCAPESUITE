@@ -26,7 +26,7 @@ import { stackCaptions } from './captionStack';
 import { sourceTimeAt } from '../store/clipSpeed';
 import { getAnimatedValues } from '../utils/animation';
 import { openOutputFrame, type PixelSize } from './outputTransform';
-import { elementSeekTarget, elementShowsFrameFor } from './elementSeek';
+import { elementSeekTarget, elementShowsFrameFor, elementSitsAt } from './elementSeek';
 import { watchPresentedFrame, type PresentedFrameWatch } from './presentedFrame';
 import {
   SourceNotSeekableError,
@@ -77,8 +77,13 @@ export interface ElementSources {
   sourceNames: Map<string, string>;
   /**
    * Each loaded `<video>`'s source frame rate — its `SourceVideo.frameRate` —
-   * for the seek decision (`elementShowsFrameFor`, ESCSUITE-505). A source the
-   * export was not handed the record of has no entry and counts as 30.
+   * for the seek decision (`elementShowsFrameFor`, ESCSUITE-505), only where
+   * something stands behind it: `frameRateSource` `'measured'` (an import in
+   * Chromium) or `'configured'` (an ESCAPECRAFT take). A rate nobody measured
+   * — `'assumed'`, which every import in Firefox is (ESCSUITE-327), or absent,
+   * which reads the same — and a source the export was not handed the record of
+   * have no entry: the composer then skips a seek only for a request the element
+   * already answered (`elementSitsAt`).
    */
   frameRates: Map<string, number>;
 }
@@ -163,7 +168,7 @@ export async function loadElementSources(
           videoElements.set(sourceId, video);
           extraVideoElements.set(sourceId, []);
           sourceNames.set(sourceId, mediaName);
-          if (source) frameRates.set(sourceId, source.frameRate);
+          if (source && hasKnownFrameRate(source)) frameRates.set(sourceId, source.frameRate);
         } catch (e) {
           console.warn(`Failed to load video ${sourceId}, trying as image:`, e);
           // Try loading as image as fallback
@@ -243,6 +248,15 @@ export function createElementSourceRelease(sources: ElementSources): () => void 
   };
 }
 
+/**
+ * Whether `source`'s frame rate is one something stands behind — measured from
+ * its presented frames at import, or the rate ESCAPECRAFT was configured to
+ * record at — rather than a placeholder (ESCSUITE-276, ESCSUITE-505).
+ */
+function hasKnownFrameRate(source: SourceVideo): boolean {
+  return source.frameRateSource === 'measured' || source.frameRateSource === 'configured';
+}
+
 /** What {@link syncVideoToTime} did, for the wedge count and the diagnostic log. */
 interface SyncOutcome {
   /** Whether it assigned `currentTime`. */
@@ -269,6 +283,12 @@ interface SyncOutcome {
  * is wrong for an ESCAPECRAFT take (capture-time timestamps) or a 60 fps file
  * recorded as 30 — a 0.5x clip of one would repeat every other frame.
  *
+ * A source whose rate nobody measured (`sourceFrameRate` undefined: every
+ * import in Firefox, ESCSUITE-327) has no grid to judge by — a 50 fps file is
+ * stored at a placeholder 30 — so its seek is skipped only when the element
+ * already sits at the request or its seek target (`elementSitsAt`): a slowed
+ * clip of it seeks once per output frame, as a clip at 1x does.
+ *
  * Resolves to what the request did: above all whether a seek it issued landed
  * ('seeked' fired) — what the wedge count reads alongside the element's state
  * once both waits are over (`seekWedge.ts`, ESCSUITE-305). A skipped seek did
@@ -288,7 +308,11 @@ async function syncVideoToTime(
   // from before the seek (ESCSUITE-454, `presentedFrame.ts`).
   let presented: PresentedFrameWatch | undefined;
   const withinOutputWindow = Math.abs(video.currentTime - targetTime) <= (1 / outputFrameRate) * 0.4;
-  if (!withinOutputWindow || !elementShowsFrameFor(video.currentTime, targetTime, sourceFrameRate)) {
+  const showsRequestedFrame =
+    sourceFrameRate === undefined
+      ? elementSitsAt(video.currentTime, targetTime)
+      : withinOutputWindow && elementShowsFrameFor(video.currentTime, targetTime, sourceFrameRate);
+  if (!showsRequestedFrame) {
     issued = true;
     presented = watchPresentedFrame(video);
     // Just past the target: a target on a frame's exact start would otherwise
