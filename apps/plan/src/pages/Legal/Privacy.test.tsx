@@ -55,6 +55,28 @@ describe('Privacy §2.1 usage analytics (ESCSUITE-407)', () => {
 
   it('bumps the last-updated date', () => {
     render(<Privacy />)
-    expect(screen.getByText(/^Last updated:/)).toHaveTextContent('Last updated: November 15, 2026')
+    expect(screen.getByText(/^Last updated:/)).toHaveTextContent('Last updated: November 23, 2026')
+  })
+
+  // ESCSUITE-452: the offline build fetches a video when ESCAPEARTIST is given
+  // that video's address (?video= or LOAD_VIDEO), as the /limitations page says,
+  // so the policy can't say it makes no network requests at all.
+  it('says the offline build fetches only a video address you give ESCAPEARTIST', () => {
+    render(<Privacy />)
+    const text = document.body.textContent ?? ''
+    expect(text).not.toMatch(/no network requests at all/)
+    const sentence =
+      /makes no network requests of its own; it fetches a video only when you give ESCAPEARTIST that video.s address/
+    expect(screen.getByText(sentence, { selector: 'p' })).toBeInTheDocument()
+    expect(screen.getByText(sentence, { selector: 'li' })).toBeInTheDocument()
+  })
+
+  // ESCSUITE-452: nothing backs a fixed 90 days; Vercel's reporting window
+  // depends on the plan.
+  it('states analytics retention as the Vercel plan window, not a fixed day count', () => {
+    render(<Privacy />)
+    const item = screen.getByText(/^Analytics data:/, { selector: 'strong' }).closest('li')
+    expect(item).toHaveTextContent('Analytics data: Kept by Vercel for the reporting window of our plan')
+    expect(item?.textContent).not.toMatch(/\d+ days/)
   })
 })
