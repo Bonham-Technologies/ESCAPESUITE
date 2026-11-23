@@ -33,15 +33,16 @@ what is already stored.
   Cluster, except that it **forces** a Cluster on a delta frame once one would pass 32.767 s; the
   video cue on such a Cluster is dropped (ESCSUITE-359, below). The result keeps the original's MIME type.
   **Packet bytes are copied exactly** since Mediabunny 1.66.0: up to 1.65 its muxer also rewrote
-  every VP9 key frame header's `color_space` from the source's Colour element
-  (`fixVP9ColorSpace`). The remux does not restore that — the export does, for frames it encodes
-  (`webm-export-reliability.md`, ESCSUITE-284) — so a remuxed take's headers stay as its encoder
-  wrote them (an ESCAPECRAFT WebCodecs take's already carry the reported matrix). Whether a repaired Firefox VP9 file previews with a colour shift since then is **not measured
-  in a browser**. ESCSUITE-485 read the code: only a WebM with no usable Cues is repaired (a
-  MediaRecorder file, never a Mediabunny-written one), and the repair now keeps the header the
-  recording browser's encoder wrote, which is what that browser's own `<video>` was already
-  showing before import; up to 1.65 the remux instead made the header agree with the file's
-  Colour element. A shift is likely only for a file whose Colour element and header disagree. **Alpha is preserved**: Mediabunny reads a
+  every VP9 key frame header's `color_space` (`fixVP9ColorSpace`) from the matrix of the decoder
+  configuration it was handed. The remux hands it the source track's, whose matrix is the Colour
+  element's where that names one, and otherwise the one the first key frame header implies. So up
+  to 1.65 the header took the Colour element's matrix where VP9 has a code for it (BT.709 2,
+  BT.470BG 1, SMPTE 170M 3, RGB 7) and 0, "unknown", where it has none (BT.2020); a file with no
+  Colour element kept its header, except that a BT.2020 header (5) became 0. The remux does not
+  restore that — the export does, for frames it encodes (`webm-export-reliability.md`,
+  ESCSUITE-284) — so a remuxed take's headers stay as its encoder wrote them (an ESCAPECRAFT
+  WebCodecs take's already carry the reported matrix). See **Colour after repair** below for the
+  measurement (ESCSUITE-504): the repair shifts no colour. **Alpha is preserved**: Mediabunny reads a
   BlockGroup's BlockAdditional (BlockAddID 1) on an `AlphaMode` 1 track as `sideData.alpha` and
   writes it back the same way on a track it marks `AlphaMode` 1 — pinned over a hand-built
   BlockGroup+BlockAdditions WebM (`test/fixtures/webmFixture.ts`) by packet count, timestamp,
@@ -76,6 +77,58 @@ what is already stored.
   and every other type come back as the same object. Pinned by
   `videoProcessor.seekIndexFirst.test.ts` (media doubles that wedge only while they hold the raw
   file).
+
+## Colour after repair (ESCSUITE-504)
+
+ESCSUITE-485 asked whether an imported, repaired Firefox VP9 recording previews with a colour
+shift since Mediabunny 1.66 dropped the header rewrite, and answered from the code. Measured on
+2026-11-23 in Firefox 159 and Chromium 159 (Playwright's headless builds, Linux): **the repair
+shifts no colour.** In both browsers, ARTIST's preview and a plain `<video>` read the same colours
+after the repair as before it, to the code value.
+
+- **Firefox's MediaRecorder records no VP9.** Firefox 159 answers
+  `MediaRecorder.isTypeSupported('video/webm;codecs=vp9')` false, and its constructor throws
+  NotSupportedError for that type. It records VP8, with no Cues and no Colour element. A Firefox
+  VP9 WebM comes only from WebCodecs (an ESCAPECRAFT take, an ARTIST export), which Mediabunny
+  writes with Cues, so the import never repairs one. The 1.65 rewrite was VP9-only, so it never
+  touched a Firefox MediaRecorder file either.
+- **Chromium 159's MediaRecorder** writes VP9 with a Cues index the probe honours, so as made it
+  is not repaired. It labels the file BT.709 full range in both places: the key frame header
+  (`color_space` 2, `color_range` 1) and the Colour element (matrix 1, range 2, transfer 13,
+  primaries 1). For that file 1.65 wrote back the 2 the header already held.
+- **Method** (`apps/e2e/tests/regressions/ESCSUITE-504.spec.ts`, which runs in Chromium on every
+  PR and in Firefox in the Nightly): eight colour patches are drawn on a 640x360 canvas and
+  recorded with `canvas.captureStream()` and `MediaRecorder`. Both browsers' recordings are
+  committed (`apps/e2e/fixtures/mediarecorder-colour`), so each browser imports the other's file
+  as well as its own. The cases are Firefox's VP8 recording, and Chromium's VP9 recording with its
+  Cues emptied in place, which is the shape `webm-duration-fix` left on ESCAPECRAFT's takes. A
+  third case records afresh with the running browser's own MediaRecorder, using VP9 where the
+  browser offers it, so a Firefox that gains VP9 is measured on its next run. Each file is
+  imported into ARTIST and read four ways: by a plain `<video>` and by the preview canvas, each
+  before the repair (the stored row's bytes put back and the session restored) and after it. The
+  spec checks that the repair kept every video packet byte for byte and kept the Colour element.
+  It fails if any reading after the repair is more than 2/255 from the one before.
+- **Result**, as mean / max channel difference from the drawn RGB, out of 255. Each "before"
+  figure is the same as its "after" figure, `<video>` and preview alike:
+
+  | File | Firefox, before / after repair | Chromium, before / after repair |
+  |---|---|---|
+  | Firefox MediaRecorder, VP8 | 0.83 / 2, both | 0.83 / 2, both |
+  | Chromium MediaRecorder, VP9, Cues emptied | **9.04 / 35, both** | 0.79 / 2, both |
+
+  The 9.04 / 35 is **Firefox's decoder, not the repair**: it is there before the repair too.
+  Firefox reads Chromium's full-range BT.709 VP9 as limited-range BT.601, which fits its reading
+  to within a mean of 1.07. The drawn (228,61,99) reads (226,31,97). Not fixed here; it is a
+  separate finding about Firefox decoding a full-range VP9 file.
+- **Mediabunny 1.65 against 1.66, run over real bytes**: Chromium's recording and variants of it,
+  remuxed in Node through each version's `EncodedPacketSink` and `EncodedVideoPacketSource`
+  (the 1.65 package fetched for the comparison, not a dependency). Results under 1.65: header 0
+  with Colour BT.709 became 2; header 5 with Colour BT.709 became 2; with no Colour element,
+  header 0 stayed 0 and header 5 became 0. Under 1.66 every header stayed as it was. So a
+  repaired file can preview differently than it did before 1.66 only in two cases. One is a VP9
+  file with no usable Cues whose Colour element names a matrix its header does not. The other is
+  a BT.2020 header with no Colour element, which 1.66 keeps and 1.65 turned into "unknown".
+  Neither browser's MediaRecorder writes either one.
 
 ## Cues on delta frames (ESCSUITE-359)
 
