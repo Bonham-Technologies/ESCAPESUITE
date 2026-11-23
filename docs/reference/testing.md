@@ -199,6 +199,16 @@ Firefox's encoder leaves it: that variant is what fails in Chromium when the app
 (`vp9ColourSpace.ts`) breaks. Firefox runs it in the Nightly and in `e2e-cross-browser` when the
 spec changes.
 
+**Colour through the import's seek-index repair** (ESCSUITE-504).
+`regressions/ESCSUITE-504.spec.ts` imports MediaRecorder WebMs of eight drawn colour patches into
+ARTIST. Two are committed recordings, Firefox 159's VP8 and Chromium 159's VP9 with its Cues
+emptied (`fixtures/mediarecorder-colour`); the third is recorded afresh by the running browser. It
+reads the patches with a plain `<video>` and with the preview canvas, before the repair (the
+stored row put back to the original bytes, then the session restored) and after it. It fails when
+the repair changes a video packet or moves a colour by more than 2/255. The colours against the
+drawn RGB are annotations; ARTIST's `seek-index-repair-at-import.md` records them. It skips in
+WebKit, which cannot import media under Playwright.
+
 **Blind spots.** Workers started from `blob:` or `data:` URLs (the single-file builds inline theirs
 that way), workers started by a worker (Playwright does not route their script requests), shared
 and service workers are not probed. In a module worker, a decoder made while its
