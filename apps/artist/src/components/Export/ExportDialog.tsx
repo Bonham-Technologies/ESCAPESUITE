@@ -231,6 +231,17 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // one the user is looking at, so its own completion or cancellation never
   // makes it look current to itself again later.
   const latestExportRef = useRef<AbortController | null>(null);
+  // The "close a couple of seconds after finishing" timer (ESCSUITE-502).
+  // Kept so it can be cleared when the dialog unmounts or another run starts:
+  // left running, it would call onClose for a dialog that is already gone.
+  const autoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearAutoClose = useCallback(() => {
+    if (autoCloseTimerRef.current !== null) {
+      clearTimeout(autoCloseTimerRef.current);
+      autoCloseTimerRef.current = null;
+    }
+  }, []);
+  useEffect(() => clearAutoClose, [clearAutoClose]);
 
   // What the live region is saying, and what the throttle has already said
   // (ESCSUITE-215). Refs rather than state on purpose: every progress report
@@ -587,6 +598,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     latestExportRef.current = abortController;
+    clearAutoClose();
     // ESCSUITE-220: also the run a crash elsewhere in the editor must stop.
     // The ErrorBoundary unmounts this dialog without reaching handleCancel,
     // and `main.tsx`'s onError aborts whatever is registered here.
@@ -726,7 +738,8 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         });
 
         // Close dialog after a delay
-        setTimeout(() => {
+        autoCloseTimerRef.current = setTimeout(() => {
+          autoCloseTimerRef.current = null;
           if (isCurrentRun()) {
             onClose();
             setProgress(null);
@@ -806,7 +819,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       // inside, for the same reason as the line above.
       clearLiveExport(abortController);
     }
-  }, [clips, tracks, sourceVideos, advancedOptions, projectName, projectResolution, mp4Supported, projectHasAudio, onClose, timeRange]);
+  }, [clips, tracks, sourceVideos, advancedOptions, projectName, projectResolution, mp4Supported, projectHasAudio, onClose, timeRange, clearAutoClose]);
 
   const handleCancel = useCallback(() => {
     // Abort any in-progress export
@@ -821,6 +834,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     // pass isCurrentRun() and could resurrect its progress if the dialog is
     // reopened before its promise actually settles.
     latestExportRef.current = null;
+    clearAutoClose();
     setProgress(null);
     setMp4FailedError(null);
     // The dialog stays mounted, so a stale alert would be re-announced the next
@@ -829,7 +843,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     setOfferMp4Fallback(false);
     setExportedWithoutSound(null);
     onClose();
-  }, [onClose]);
+  }, [onClose, clearAutoClose]);
 
   const handleWebMFallback = useCallback(() => {
     // Start a WebM export with the same quality/resolution settings
