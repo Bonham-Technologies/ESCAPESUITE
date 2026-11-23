@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v37. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v38. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: dependabot role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and `.claude/rules/autopilot.local.md` load in every session and apply here too.
@@ -89,6 +89,6 @@ For each untriaged PR:
      triage comment carries `Review: reviewer pass, qc pass` and says `Formerly
      owner-merge: dependency major` or `Formerly owner-merge: pushed alignment`.
 
-   Otherwise label it `needs-owner` with the reason. Before you push to a PR with
+   Otherwise label it `needs-owner` with the reason, turning its auto-merge off first if it is on. Before you push to a PR with
    auto-merge on, turn it off (builder, **New commits**). If the verdict is `merge` but
    `ci-status` is still pending and auto-merge is off, leave it open for a later sweep.

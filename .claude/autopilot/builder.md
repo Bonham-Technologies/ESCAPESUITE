@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v37. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v38. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: builder role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -108,7 +108,7 @@ budget, or after two failures in a row. For each ticket:
      to date (**Always**). If its head moved off the comment's `Head:`
      sha by anything but an update-branch merge of `main`, turn auto-merge off
      (`disable_pr_auto_merge`). If its `auto_merge` is null, someone turned it off, and if
-     `ci-status` failed or the update conflicts, it is stuck: either way label the PR
+     `ci-status` failed or the update conflicts, it is stuck: either way turn its auto-merge off if it is on, label the PR
      `needs-owner`, swap the ticket's `ap-merging` for `needs-owner`, and say so on both.
    - `ap-owner-merge`: label the PR `needs-owner` on GitHub. The ticket **stays In
      Progress**: add the Jira label `needs-owner` and a comment linking the PR, and
@@ -131,25 +131,25 @@ budget, or after two failures in a row. For each ticket:
 Merge one under the `ap-auto` rules, with no ticket, when all of these hold: every file
 in `gh api repos/{owner}/{repo}/pulls/{n}/files` is `.claude/.vendored-manifest` or is
 listed in it; `.claude/rules/autopilot.local.md` is not among them; the head has a
-fresh green, or auto-merge waits for one. Otherwise label it `needs-owner` and comment
+fresh green, or auto-merge waits for one. Otherwise turn its auto-merge off if it is on, label it `needs-owner` and comment
 which condition failed.
 A refused merge goes as step 6's **Merge refused**.
 Refresh PRs are the only `.claude/rules/` and `.claude/autopilot/` changes that aren't
 owner-merged: the owner approved them when they merged in bonham-ops.
 
-**Keep fresh** (BORG-98). Last in every run, after its final merge, unless `Builder
+**Keep fresh** (BORG-98, BORG-135). Last in every run, after its final merge, unless `Builder
 paused` or `main` is red: keep owner-merge PRs one click from mergeable. List the open
 PRs labelled `needs-owner`, oldest first:
 `gh api 'repos/{owner}/{repo}/issues?labels=needs-owner&state=open&sort=created&direction=asc&per_page=100' --jq '.[] | select(.pull_request) | .number'`.
-Skip one from a fork, one not by the owner on a public repo (`public-repos.md`), one
-with `auto_merge` set, one whose head sha a keep-fresh conflict comment names, and a
+Skip one from a fork, one not by the owner on a public repo (`public-repos.md`), one whose head sha a keep-fresh conflict comment names, and a
 stacked one ("Merge after #N") until #N has merged; then, if it still targets #N's
 branch, retarget it first (`gh api -X PATCH repos/{owner}/{repo}/pulls/{n} -f base=main`).
-For each whose `compare/main...<head sha>` has `behind_by` above 0, call update-branch,
+**Armed first.** A `needs-owner` PR with `auto_merge` set was armed by the owner, and that click is their merge decision: no run arms or merges a `needs-owner` PR, and a run that labels an armed PR `needs-owner` turns its auto-merge off first (`disable_pr_auto_merge`; policy, **Always**). Take armed ones oldest first, one at a time, at most 3 in the run: if `behind_by` is above 0, call update-branch, wait for its `ci-status`, and go to the next only once it has merged or is stuck (the update conflicts or `ci-status` fails: comment as below). If after 30 minutes it is still pending, behind again, or green but unmerged, leave it uncommented for the next run and go to the next.
+Then, for each unarmed one whose `compare/main...<head sha>` has `behind_by` above 0, call update-branch,
 not waiting for its CI, until 10 have updated in the run. On a conflict, a
 `CHANGELOG.md`-only one included, comment with first line
-`<!-- autopilot:keep-fresh-conflict -->`, then `Head: <sha>` and the files if known, and
-leave it. This step never merges, enables auto-merge or pushes commits.
+`<!-- autopilot:keep-fresh-conflict -->`, then `Head: <sha>` (the head it stopped on) and the files (or the failed check) if known, and
+leave it. This step never merges, enables auto-merge or pushes commits: GitHub merges an armed PR on the owner's click.
 
 **A "Refresh <page title> for <changes>" ticket** is a Confluence edit, not a PR. Change
 only the statements the ticket names, keep the page's structure and voice, and never
