@@ -329,7 +329,6 @@ describe('createFrameComposer', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
-      frameRate: 30,
     })
 
     await composeFrame(0)
@@ -351,7 +350,7 @@ describe('createFrameComposer', () => {
     expect(order.indexOf('fillRect')).toBeLessThan(order.indexOf('drawImage'))
   })
 
-  it('skips a seek that is already within half an output frame of the target', async () => {
+  it('skips a seek to the frame of the source the element already shows', async () => {
     await store('v1')
     const clips = [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1 })]
     const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]), [])
@@ -367,17 +366,16 @@ describe('createFrameComposer', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
-      frameRate: 10,
     })
     const seeksBefore = media.seeks.length
 
-    // The element sits at 0 after the rewind. At 10 fps the tolerance is
-    // 0.4 / 10 = 40 ms, so a frame at t = 0.02 reuses the position it has and a
-    // frame at t = 0.1 does not.
-    await composeFrame(0.02)
+    // The element sits at 0 after the rewind, on frame 0 of the 30 fps source
+    // (ESCSUITE-505, `elementShowsFrameFor`): t = 0.01 is still frame 0 and
+    // reuses the position it has, t = 0.04 is frame 1 and does not.
+    await composeFrame(0.01)
     expect(media.seeks).toHaveLength(seeksBefore)
 
-    await composeFrame(0.1)
+    await composeFrame(0.04)
     expect(media.seeks).toHaveLength(seeksBefore + 1)
   })
 
@@ -400,7 +398,6 @@ describe('createFrameComposer', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
-      frameRate: 30,
     })
     const seeksBefore = media.seeks.length
 
@@ -427,7 +424,6 @@ describe('createFrameComposer', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
-      frameRate: 30,
     })
 
     await composeFrame(0.5)
@@ -458,7 +454,6 @@ describe('createFrameComposer', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
-      frameRate: 30,
     })
 
     await composeFrame(0)
@@ -502,7 +497,6 @@ describe('createFrameComposer', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
-      frameRate: 30,
     })
 
     await composeFrame(0)
@@ -532,7 +526,6 @@ describe('createFrameComposer', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
-      frameRate: 30,
     })
 
     // t = 5 is past the clip's one second, so nothing is active and the
@@ -570,7 +563,6 @@ describe('createFrameComposer readiness wait', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
-      frameRate: 30,
     })
     return { composeFrame, sources }
   }
@@ -652,7 +644,6 @@ describe('createFrameComposer seek wait', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
-      frameRate: 30,
     })
     return { composeFrame, video: sources.videoElements.get('v1')! }
   }
@@ -837,7 +828,6 @@ describe('createFrameComposer with two live clips of one source', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
-      frameRate: 30,
     })
     return { composeFrame, sources, playbackState, ctx }
   }
@@ -1021,7 +1011,6 @@ describe('createFrameComposer with two live clips of one source', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
-      frameRate: 30,
     })
 
     await composeFrame(0)
@@ -1055,7 +1044,6 @@ describe('createFrameComposer seek wedge', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
-      frameRate: 30,
       log: (phase, detail) => log.push({ phase, detail, timestamp: 0 }),
     })
     return { composeFrame, ctx, sources, log }
@@ -1298,7 +1286,6 @@ describe('createFrameComposer seek wedge', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
-      frameRate: 30,
     })
 
     await frame(composeFrame, 0)
@@ -1381,5 +1368,87 @@ describe('createFrameComposer seek wedge', () => {
     for (let i = 0; i < 5; i++) await frame(composeFrame, i)
 
     expect(ctx.argsFor('drawImage')).toHaveLength(5)
+  })
+})
+
+// ESCSUITE-505: the skip window was 0.4 of an *output* frame whatever the
+// clip's speed or the source's rate, so a slowed clip of a high-rate source,
+// whose requests are closer together in source time than an output frame,
+// could skip a seek to the next source frame and repeat the one before. Each
+// frame here is read off the element the way a browser draws it: the frame of
+// the source whose start is at or before where the element sits.
+describe('createFrameComposer on a slowed clip of a high-rate source (ESCSUITE-505)', () => {
+  /** The frame of an `rate` fps source an element sitting at `time` shows. */
+  const frameAt = (time: number, rate: number) => Math.floor(time * rate + 1e-9)
+
+  // In-points: on a frame start, a third of the way into one, two thirds of the
+  // way into one (the requests straddle a frame start right after a seek), and
+  // inside the 0.4-output-frame window of the rewound element at 0.
+  const inPoints = (rate: number) => [0, 1 / (3 * rate), 2 / (3 * rate), 0.01, 0.5 + 2 / (3 * rate)]
+
+  it.each([
+    [60, 0.25],
+    [60, 0.5],
+    [120, 0.25],
+    [120, 0.5],
+  ])('shows the requested frame of a %i fps source at %s× on every output frame', async (rate, speed) => {
+    await store('v1')
+    const wrong: string[] = []
+    for (const inPoint of inPoints(rate)) {
+      const clips = [makeClip({ sourceVideoId: 'v1', startTime: inPoint, duration: 1, endTime: inPoint + 1, speed })]
+      const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1', frameRate: rate })]), [])
+      const playbackState = rewindElementSources(sources)
+      const { canvas, ctx } = outputCanvas()
+      const composeFrame = createFrameComposer({
+        ctx: ctx as unknown as CanvasRenderingContext2D,
+        canvas,
+        clips,
+        tracks: [makeTrack()],
+        sources,
+        playbackState,
+        projectSize: PROJECT,
+        outputSize: PROJECT,
+        drawOptions: { filterScale: 1 },
+      })
+      const video = sources.videoElements.get('v1')!
+
+      for (let n = 0; n < 24; n++) {
+        await composeFrame(n / 30)
+        const sourceTime = inPoint + (n / 30) * speed
+        // The frame a seek for this request shows (`elementSeekTarget`).
+        const wanted = frameAt(elementSeekTarget(sourceTime), rate)
+        const shown = frameAt(video.currentTime, rate)
+        if (shown !== wanted) wrong.push(`in ${inPoint.toFixed(4)} frame ${n}: showed ${shown}, wanted ${wanted}`)
+      }
+      releaseElementSources(sources)
+    }
+    expect(wrong).toEqual([])
+  })
+
+  it('still skips the seeks that would show the same frame: once per source frame at 0.25× of 60 fps', async () => {
+    await store('v1')
+    const clips = [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1, speed: 0.25 })]
+    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1', frameRate: 60 })]), [])
+    const playbackState = rewindElementSources(sources)
+    const { canvas, ctx } = outputCanvas()
+    const composeFrame = createFrameComposer({
+      ctx: ctx as unknown as CanvasRenderingContext2D,
+      canvas,
+      clips,
+      tracks: [makeTrack()],
+      sources,
+      playbackState,
+      projectSize: PROJECT,
+      outputSize: PROJECT,
+      drawOptions: { filterScale: 1 },
+    })
+    const seeksBefore = media.seeks.length
+
+    // 16 output frames are 8 frames of the source at 0.25×, two each. The
+    // rewound element already shows the first, so seven seeks: one for each new
+    // source frame, none for the second output frame of each.
+    for (let n = 0; n < 16; n++) await composeFrame(n / 30)
+
+    expect(media.seeks.slice(seeksBefore)).toEqual([1, 2, 3, 4, 5, 6, 7].map((k) => elementSeekTarget(k / 60)))
   })
 })

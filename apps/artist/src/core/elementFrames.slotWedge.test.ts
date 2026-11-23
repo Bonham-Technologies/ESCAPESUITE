@@ -116,7 +116,6 @@ async function composer() {
     projectSize: PROJECT,
     outputSize: PROJECT,
     drawOptions: { filterScale: 1 },
-    frameRate: 30,
   })
   return { composeFrame, ctx }
 }

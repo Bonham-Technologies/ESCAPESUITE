@@ -26,7 +26,7 @@ import { stackCaptions } from './captionStack';
 import { sourceTimeAt } from '../store/clipSpeed';
 import { getAnimatedValues } from '../utils/animation';
 import { openOutputFrame, type PixelSize } from './outputTransform';
-import { elementSeekTarget } from './elementSeek';
+import { elementSeekTarget, elementShowsFrameFor } from './elementSeek';
 import { watchPresentedFrame, type PresentedFrameWatch } from './presentedFrame';
 import {
   SourceNotSeekableError,
@@ -75,6 +75,12 @@ export interface ElementSources {
    * source whose seeks never complete fails the export with (ESCSUITE-305).
    */
   sourceNames: Map<string, string>;
+  /**
+   * Each loaded `<video>`'s source frame rate — its `SourceVideo.frameRate` —
+   * for the seek decision (`elementShowsFrameFor`, ESCSUITE-505). A source the
+   * export was not handed the record of has no entry and counts as 30.
+   */
+  frameRates: Map<string, number>;
 }
 
 /**
@@ -124,6 +130,7 @@ export async function loadElementSources(
   const imageElements: Map<string, HTMLImageElement> = new Map();
   const extraVideoElements: Map<string, (HTMLVideoElement | null)[]> = new Map();
   const sourceNames: Map<string, string> = new Map();
+  const frameRates: Map<string, number> = new Map();
 
   // Get unique source IDs, filtering out empty ones (overlay clips have no sourceVideoId)
   const uniqueSourceIds = [...new Set(clips.map(c => c.sourceVideoId).filter(id => id && id.length > 0))];
@@ -156,6 +163,7 @@ export async function loadElementSources(
           videoElements.set(sourceId, video);
           extraVideoElements.set(sourceId, []);
           sourceNames.set(sourceId, mediaName);
+          if (source) frameRates.set(sourceId, source.frameRate);
         } catch (e) {
           console.warn(`Failed to load video ${sourceId}, trying as image:`, e);
           // Try loading as image as fallback
@@ -172,11 +180,11 @@ export async function loadElementSources(
     // Nothing reaches a caller, so nothing else could free what is already
     // loaded. Both media branches warn and skip, so the only ways here are a
     // failed storage read and a source with no bytes (ESCSUITE-330).
-    releaseElementSources({ videoElements, imageElements, extraVideoElements, sourceNames });
+    releaseElementSources({ videoElements, imageElements, extraVideoElements, sourceNames, frameRates });
     throw e;
   }
 
-  return { videoElements, imageElements, extraVideoElements, sourceNames };
+  return { videoElements, imageElements, extraVideoElements, sourceNames, frameRates };
 }
 
 /**
@@ -249,8 +257,12 @@ interface SyncOutcome {
 /**
  * Sync a video to a target time. Seeks to just past the target
  * (`elementSeekTarget`, ESCSUITE-265) for frame-accurate export, skipping the
- * seek when the element is already within (a little under) half an output
- * frame of it.
+ * seek only when the element already shows the frame of the source the seek
+ * would (`elementShowsFrameFor`, ESCSUITE-505): the same frame of the source's
+ * own rate, and within half of one. The window used to be 0.4 of an *output*
+ * frame whatever the clip's speed, so a slowed clip of a high-rate source —
+ * whose requests are closer together in source time than an output frame —
+ * skipped seeks to the next source frame and repeated the one before.
  *
  * Resolves to what the request did: above all whether a seek it issued landed
  * ('seeked' fired) — what the wedge count reads alongside the element's state
@@ -260,18 +272,16 @@ interface SyncOutcome {
 async function syncVideoToTime(
   video: HTMLVideoElement,
   targetTime: number,
-  frameRate: number
+  sourceFrameRate: number | undefined
 ): Promise<SyncOutcome> {
   const started = performance.now();
   let seekLanded = false;
   let issued = false;
-  // Skip if already within (a little under) half a frame of the target.
-  const frameDuration = 1 / frameRate;
   // The sought frame's callback, registered before the seek so it cannot miss
   // it: Chromium can fire 'seeked' while the element still paints the frame
   // from before the seek (ESCSUITE-454, `presentedFrame.ts`).
   let presented: PresentedFrameWatch | undefined;
-  if (Math.abs(video.currentTime - targetTime) > frameDuration * 0.4) {
+  if (!elementShowsFrameFor(video.currentTime, targetTime, sourceFrameRate)) {
     issued = true;
     presented = watchPresentedFrame(video);
     // Just past the target: a target on a frame's exact start would otherwise
@@ -357,8 +367,6 @@ export interface FrameComposerParams {
   projectSize: PixelSize;
   outputSize: PixelSize;
   drawOptions: MediaDrawOptions;
-  /** Output frame rate — the seek tolerance is a little under half a frame of it. */
-  frameRate: number;
   /**
    * The export's diagnostic log (ESCSUITE-412). Every seek request that did
    * not land within its 500 ms wait, or that counted toward a wedge, is
@@ -396,10 +404,9 @@ export function createFrameComposer({
   projectSize,
   outputSize,
   drawOptions,
-  frameRate,
   log = () => {},
 }: FrameComposerParams): FrameComposer {
-  const { videoElements, imageElements, extraVideoElements, sourceNames } = sources;
+  const { videoElements, imageElements, extraVideoElements, sourceNames, frameRates } = sources;
   // Consecutive wedged seeks per element (ESCSUITE-305): one integer per
   // element, compared once per seek, on a path that already waits on it. Keyed
   // by element, not by source — a source's further elements (ESCSUITE-313) each
@@ -432,7 +439,7 @@ export function createFrameComposer({
     sourceTime: number
   ): Promise<string | undefined> => {
     const atStart = wedgeCountAtStart(wedgedSeeks.get(video) ?? 0, video);
-    const outcome = await syncVideoToTime(video, sourceTime, frameRate);
+    const outcome = await syncVideoToTime(video, sourceTime, frameRates.get(sourceId));
     const wedged = nextWedgeCount(atStart, video, outcome.landed);
     wedgedSeeks.set(video, wedged);
     if ((outcome.issued && !outcome.landedPromptly) || wedged > atStart) {

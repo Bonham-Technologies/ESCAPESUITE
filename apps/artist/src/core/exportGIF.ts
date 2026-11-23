@@ -196,7 +196,6 @@ export async function exportToGIF(
       projectSize,
       outputSize,
       drawOptions,
-      frameRate,
       log,
     });
 

@@ -50,3 +50,64 @@ export const ELEMENT_SEEK_BIAS = 1e-3;
 export function elementSeekTarget(time: number): number {
   return time + ELEMENT_SEEK_BIAS;
 }
+
+/**
+ * How far from the element's current time a request may be before the `<video>`
+ * path seeks: half of one frame at the source's own rate, since anything closer
+ * is the frame already showing and anything further is a different one
+ * (ESCSUITE-263). The rate is floored at 30 because the export asks for frames
+ * 1/30 s apart: below 15 fps a half-frame window would be wider than that spacing
+ * and serve the previous frame across a boundary. A rate that is missing or not
+ * finite and positive counts as 30. An imported video's rate is measured
+ * at import (ESCSUITE-276, `frameRateSource: 'measured'`); a rate the probe
+ * could not measure, an ESCAPECRAFT take (`'configured'`) and every source
+ * imported before then carry 30, so they get the 1/60 s window. The element
+ * itself sits `ELEMENT_SEEK_BIAS` past the last request it was seeked for
+ * (ESCSUITE-265), far inside this window.
+ *
+ * A window alone is not the whole decision: see {@link elementShowsFrameFor}.
+ */
+export function seekToleranceFor(frameRate: number | undefined): number {
+  return 0.5 / Math.max(usableFrameRate(frameRate), 30);
+}
+
+/** `frameRate` when it is finite and positive; 30 otherwise. */
+function usableFrameRate(frameRate: number | undefined): number {
+  return frameRate !== undefined && Number.isFinite(frameRate) && frameRate > 0 ? frameRate : 30;
+}
+
+/**
+ * Whether a `<video>` sitting at `currentTime` already shows the frame a seek
+ * for `time` would, so the seek can be skipped (ESCSUITE-505). Both element
+ * paths decide with it: `HTMLVideoFrameSource.getFrame()` (MP4) and
+ * `elementFrames.ts`'s `syncVideoToTime` (WebM, GIF).
+ *
+ * Two conditions, both at the source's own rate (30 when it is missing or not
+ * finite and positive):
+ *
+ * - **The same frame.** The frame a seek would show — the one `elementSeekTarget(time)`
+ *   falls in, frame k starting at k / rate — is the one `currentTime` falls in.
+ *   A slowed clip's requests are closer together in source time than an output
+ *   frame, so a window alone, however narrow, lets a request just past a frame
+ *   start skip a seek from an element sitting just before it: at 0.25x a 120
+ *   fps source moves on a frame every output frame, inside the old 0.4-output-frame
+ *   window, and even half a source frame straddles a frame start when a trim
+ *   puts the requests off the frame grid.
+ * - **Within half a frame** ({@link seekToleranceFor}): the window both paths
+ *   had, kept as a ceiling for a source whose frames are not on that grid (an
+ *   ESCAPECRAFT take's timestamps are its capture times) or whose rate is a
+ *   placeholder.
+ *
+ * Either one failing seeks, so this never skips a seek the half-frame window
+ * would have issued, and for a source on its rate's grid it never skips a seek
+ * to a different frame, whatever the clip's speed.
+ */
+export function elementShowsFrameFor(
+  currentTime: number,
+  time: number,
+  frameRate: number | undefined
+): boolean {
+  if (Math.abs(time - currentTime) > seekToleranceFor(frameRate)) return false;
+  const rate = usableFrameRate(frameRate);
+  return Math.floor(currentTime * rate) === Math.floor(elementSeekTarget(time) * rate);
+}

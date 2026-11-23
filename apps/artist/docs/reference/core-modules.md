@@ -382,9 +382,11 @@
   throw from any of them left the worker alive until the tab closed. Its catch calls the same
   kind of run-once `release` the success path does (the frame manager disposed, the worker
   terminated, the image URLs revoked — once) and closes whatever its own `openEncoders` list
-  holds. The composer takes
-  the output `frameRate` because the seek tolerance is a little under half a frame of it —
-  the one value that had to become a parameter, 30 for WebM and 10/15/20 for GIF.
+  holds. The composer used to take the output `frameRate` (30 for WebM, 10/15/20 for GIF)
+  because its seek tolerance was 0.4 of a frame of it; since ESCSUITE-505 it decides each
+  seek at the source's own rate (`ElementSources.frameRates`, filled by `loadElementSources`
+  from `SourceVideo.frameRate`; `elementShowsFrameFor` in `elementSeek.ts`), so it takes no
+  frame rate.
   `exportMP4.ts` is deliberately
   **not** a caller: it decodes through `videoDecodeManager.ts` / `frameSource.ts` and draws
   `VideoFrame`s, so it shares `canvasRenderer.ts` but not this. The extraction is a pure

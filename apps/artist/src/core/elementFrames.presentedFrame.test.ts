@@ -39,6 +39,7 @@ function composerOver(video: PresentingVideo) {
     imageElements: new Map(),
     extraVideoElements: new Map([['v1', []]]),
     sourceNames: new Map([['v1', 'take.webm']]),
+    frameRates: new Map([['v1', 30]]),
   }
   const clips = [
     makeClip({ id: 'A', sourceVideoId: 'v1', trackId: 't1', startTime: 0.5, endTime: 2.5, duration: 2 }),
@@ -64,7 +65,6 @@ function composerOver(video: PresentingVideo) {
     projectSize: PROJECT,
     outputSize: PROJECT,
     drawOptions: { filterScale: 1 },
-    frameRate: 30,
   })
   return { composeFrame, drawn }
 }

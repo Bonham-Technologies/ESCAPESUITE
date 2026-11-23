@@ -470,9 +470,13 @@ describe('exportToWebM rendering', () => {
   it('seeks a sped clip to the source time its speed puts under each frame (ESCSUITE-471)', async () => {
     await run({
       clips: [makeClip({ startTime: 2, duration: CLIP_DURATION, endTime: 2 + CLIP_DURATION / 2, speed: 0.5 })],
+      // A 60 fps source, so every request is a new source frame and is seeked:
+      // a 30 fps one skips the seeks that would show the frame it already has
+      // (ESCSUITE-505).
+      sources: [makeSourceVideo({ width: 640, height: 360, frameRate: 60 })],
     })
 
-    // Half a source frame per timeline frame.
+    // Half a 30 fps source frame per timeline frame.
     expect(media.seeks.slice(1)).toEqual([0, 1, 2, 3, 4, 5].map((i) => elementSeekTarget(2 + i / 60)))
   })
 
