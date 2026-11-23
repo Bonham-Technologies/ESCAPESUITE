@@ -41,6 +41,8 @@ export interface WebmLayout {
   clusterPositions: number[]
   /** Every CuePoint's track positions: its time, track and Cluster. */
   cues: Array<{ time: number; track: number; clusterPosition: number }>
+  /** Where the Cues element lies in the file, header included, or null without one (ESCSUITE-504). */
+  cuesElement: { start: number; end: number } | null
 }
 
 export function readWebmLayout(bytes: Uint8Array): WebmLayout {
@@ -85,6 +87,7 @@ export function readWebmLayout(bytes: Uint8Array): WebmLayout {
     videoBlocks: [],
     clusterPositions: [],
     cues: [],
+    cuesElement: null,
   }
 
   for (let at = segment.dataStart; at < bytes.length; ) {
@@ -106,6 +109,7 @@ export function readWebmLayout(bytes: Uint8Array): WebmLayout {
         }
       }
     } else if (e.id === CUES) {
+      layout.cuesElement = { start: e.start, end: e.end }
       for (const point of children(e)) {
         const fields = children(point)
         const time = uint(fields.find((f) => f.id === 0xb3)!)
