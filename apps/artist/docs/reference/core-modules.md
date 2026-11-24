@@ -388,7 +388,9 @@
   (`ElementSources.frameRates`, filled by `loadElementSources` from `SourceVideo.frameRate`
   when its `frameRateSource` is `'measured'` or `'configured'`; `elementShowsFrameFor` in
   `elementSeek.ts`). A source whose rate was only assumed (every Firefox import) skips a
-  seek only when the element already sits at the request (`elementSitsAt`).
+  seek only when the element already sits at the request (`elementSitsAt`). The filter is
+  `knownFrameRate` (`elementSeek.ts`), which `exportMP4.ts` also applies before handing a
+  rate to `HTMLVideoFrameSource` (ESCSUITE-508).
   `exportMP4.ts` is deliberately
   **not** a caller: it decodes through `videoDecodeManager.ts` / `frameSource.ts` and draws
   `VideoFrame`s, so it shares `canvasRenderer.ts` but not this. The extraction is a pure

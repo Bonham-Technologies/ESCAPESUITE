@@ -17,6 +17,7 @@ import { stackCaptions } from './captionStack';
 import { sourceTimeAt } from '../store/clipSpeed';
 import { getAnimatedValues } from '../utils/animation';
 import { isWebCodecsAvailable } from './frameSource';
+import { knownFrameRate } from './elementSeek';
 import type { DrawableMediaSource, MediaDrawOptions, ProgressCallback, ExportLogEntry } from './exportTypes';
 import { openOutputFrame, projectToOutputScale } from './outputTransform';
 import {
@@ -389,7 +390,10 @@ export async function exportToMP4(
             blob,
             blob.type || 'video/mp4',
             reportInPageDecoding,
-            source?.frameRate,
+            // Only a rate something stands behind: a placeholder 30 (every
+            // import outside Chromium) would judge a slowed clip's seeks on
+            // the wrong grid and repeat frames (ESCSUITE-508).
+            knownFrameRate(source),
             source?.name
           );
         } catch (e) {

@@ -26,7 +26,7 @@ import { stackCaptions } from './captionStack';
 import { sourceTimeAt } from '../store/clipSpeed';
 import { getAnimatedValues } from '../utils/animation';
 import { openOutputFrame, type PixelSize } from './outputTransform';
-import { elementSeekTarget, elementShowsFrameFor, elementSitsAt } from './elementSeek';
+import { elementSeekTarget, elementShowsFrameFor, elementSitsAt, knownFrameRate } from './elementSeek';
 import { watchPresentedFrame, type PresentedFrameWatch } from './presentedFrame';
 import {
   SourceNotSeekableError,
@@ -168,7 +168,8 @@ export async function loadElementSources(
           videoElements.set(sourceId, video);
           extraVideoElements.set(sourceId, []);
           sourceNames.set(sourceId, mediaName);
-          if (source && hasKnownFrameRate(source)) frameRates.set(sourceId, source.frameRate);
+          const frameRate = knownFrameRate(source);
+          if (frameRate !== undefined) frameRates.set(sourceId, frameRate);
         } catch (e) {
           console.warn(`Failed to load video ${sourceId}, trying as image:`, e);
           // Try loading as image as fallback
@@ -246,15 +247,6 @@ export function createElementSourceRelease(sources: ElementSources): () => void 
     released = true;
     releaseElementSources(sources);
   };
-}
-
-/**
- * Whether `source`'s frame rate is one something stands behind — measured from
- * its presented frames at import, or the rate ESCAPECRAFT was configured to
- * record at — rather than a placeholder (ESCSUITE-276, ESCSUITE-505).
- */
-function hasKnownFrameRate(source: SourceVideo): boolean {
-  return source.frameRateSource === 'measured' || source.frameRateSource === 'configured';
 }
 
 /** What {@link syncVideoToTime} did, for the wedge count and the diagnostic log. */
