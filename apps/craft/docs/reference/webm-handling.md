@@ -33,6 +33,13 @@
   option and was not taken: it would rebuild every block, and whether it keeps the alpha
   BlockAdditions byte for byte is exactly what a rewrite of the Cues alone never has to prove.
   Takes stored before this carry the empty Cues; nothing repairs them in place
+- **The compositor's canvas is opaque** (`getContext('2d', { alpha: false })`, ESCSUITE-507).
+  With an alpha channel, Chromium's MediaRecorder encoded a VP9 alpha layer into every
+  composited-PiP take (the BlockGroups above), and Firefox converts every frame of an alpha VP9
+  file as limited-range BT.601 whatever the file says, so those takes previewed and exported in
+  Firefox up to 35/255 off. The compositor fills every frame black first, so no pixel changes.
+  Takes recorded since carry SimpleBlocks with no BlockAdditions; older ones keep their alpha
+  (ARTIST's `seek-index-repair-at-import.md`, "Colour after repair")
 - Thumbnails captured from live preview (more reliable than from blob)
 - Metadata extraction has fallbacks for problematic WebM files
 - **The repair runs on MediaRecorder output only**, once, at save time.
