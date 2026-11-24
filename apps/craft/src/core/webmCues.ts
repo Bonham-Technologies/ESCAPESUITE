@@ -4,9 +4,11 @@
  *
  * `webm-duration-fix` writes the Duration and a Cues element, but it records a
  * CuePoint only at the first video **SimpleBlock** of a cluster. Chrome's
- * MediaRecorder writes every frame of the compositor's alpha-VP9 canvas stream
- * as a **BlockGroup** (the alpha plane rides in BlockAdditions), so a
+ * MediaRecorder writes every frame of an alpha-VP9 canvas stream as a
+ * **BlockGroup** (the alpha plane rides in BlockAdditions), and the
+ * compositor's canvas had an alpha channel until ESCSUITE-507, so a
  * composited-PiP take came out of the library with an empty Cues element.
+ * Takes since are SimpleBlocks; both shapes are indexed here.
  * Chromium's `<video>` scans such a file and seeks it anyway; Firefox's seek
  * into a cluster that does not open on a keyframe never fires `seeked`, so an
  * ESCAPEARTIST export of the take on Firefox drew black frames (ESCSUITE-305).
