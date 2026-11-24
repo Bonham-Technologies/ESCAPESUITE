@@ -680,19 +680,21 @@ export interface EditorState {
   /**
    * The clip the preview's **crop mode** is open on (ESCSUITE-157), or null.
    *
-   * A latch, deliberately not kept in step with anything: every reader requires
-   * it to name the *selected* clip (`components/Preview/cropOverlay.ts`'s
-   * `cropTarget`), so selecting another clip, deselecting, deleting the clip,
-   * loading another project and undoing the clip away all leave crop mode
-   * without a single line of synchronisation. View state — not in the project,
-   * not in the undo history, not in a saved file.
+   * A latch: every reader requires it to name the *selected* clip
+   * (`components/Preview/cropOverlay.ts`'s `cropTarget`), so selecting another
+   * clip, deselecting, deleting the clip, loading another project and undoing
+   * the clip away all hide crop mode at once. The store also clears it when
+   * `selectedClipId` moves off its clip (`store/toolLatches.ts`, ESCSUITE-500),
+   * so reselecting the clip shows crop mode closed. View state — not in the
+   * project, not in the undo history, not in a saved file.
    */
   cropClipId: string | null;
   /**
    * The clip the preview's **Zoom to region** tool is open on (ESCSUITE-475),
    * or null. A latch exactly like `cropClipId`: the tool shows only while it
    * names the selected clip (`components/Preview/zoomRegionTarget.ts`'s
-   * `zoomRegionTarget`), so a selection change leaves it with nothing to clear.
+   * `zoomRegionTarget`), and the store clears it when `selectedClipId` moves
+   * off its clip (`store/toolLatches.ts`, ESCSUITE-500).
    * View state — not in the project, the undo history or a saved file.
    */
   zoomRegionClipId: string | null;

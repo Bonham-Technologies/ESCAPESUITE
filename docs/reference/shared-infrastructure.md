@@ -39,7 +39,7 @@
   chunk. ESCSUITE-153: before this predicate existed, the standalone build checked only
   `VITE_HEADLESS` here and shipped an un-inlined `decodeWorker-*.js` the release never attached.
   The standalone HTML also carries the hosted deployment's `rel="canonical"` and `og:url`/
-  `og:image` tags, pointing at `https://escapesuite.io` — nothing in the single-file bundle
+  `og:image` tags, pointing at `https://escapesuite.tech` — nothing in the single-file bundle
   requests either URL, so this is harmless to the offline guarantee (ESCSUITE-177 n2), just an
   odd-looking artefact of reusing the same `index.html` template for both targets.
 - **Shared dialog behaviour**: `useDialogBehaviour` (`packages/shared/src/hooks`, imported

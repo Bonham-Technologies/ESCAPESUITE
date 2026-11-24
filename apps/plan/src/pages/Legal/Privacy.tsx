@@ -19,7 +19,7 @@ export default function Privacy() {
             your device and are never uploaded to our servers.
           </p>
           <p>
-            The hosted service at escapesuite.io requires no account and no sign-in. The only data we
+            The hosted service at escapesuite.tech requires no account and no sign-in. The only data we
             collect is anonymous usage analytics via Vercel, described below. The downloadable offline
             build makes no network requests at all and transmits nothing to us.
           </p>
@@ -40,7 +40,7 @@ export default function Privacy() {
 
         <h3>2.1 Usage Analytics (Hosted Site Only)</h3>
         <p>
-          The hosted site at escapesuite.io uses Vercel Web Analytics to understand how our
+          The hosted site at escapesuite.tech uses Vercel Web Analytics to understand how our
           applications are used. It records:
         </p>
         <ul>

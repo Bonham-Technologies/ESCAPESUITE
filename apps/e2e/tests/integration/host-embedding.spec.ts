@@ -1,7 +1,7 @@
 import { dirname, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test, expect, type Frame, type Page } from '@playwright/test'
-import { ARTIST_URL, openExportDialog } from '../../utils/artist'
+import { ARTIST_URL, openExportDialog, exportButtonName } from '../../utils/artist'
 import { grantMediaPermissions } from '../../utils/media-mocks'
 
 /**
@@ -509,7 +509,7 @@ test.describe('Host embedding contract', () => {
 
     await test.step('export WebM from inside the frame', async () => {
       await openExportDialog(frame)
-      await frame.getByRole('button', { name: /download webm/i }).click()
+      await frame.getByRole('button', { name: exportButtonName('webm') }).click()
     })
 
     await test.step('the host received EXPORT_COMPLETE with a real file', async () => {

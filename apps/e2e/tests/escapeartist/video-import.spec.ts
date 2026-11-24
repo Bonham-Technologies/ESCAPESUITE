@@ -5,6 +5,7 @@ import {
   seedTextClip,
   openExportDialog,
   openExportAdvancedOptions,
+  exportButtonName,
 } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
@@ -117,7 +118,7 @@ test.describe('ESCAPEARTIST Export Options', () => {
     await seedTextClip(page)
     await openExportDialog(page)
 
-    await expect(page.getByRole('button', { name: 'Download WebM' }).first()).toBeEnabled()
+    await expect(page.getByRole('button', { name: exportButtonName('webm') }).first()).toBeEnabled()
   })
 
   test('has format selection options', async ({ page }) => {

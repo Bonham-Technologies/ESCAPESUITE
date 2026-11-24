@@ -5,7 +5,7 @@ The monorepo deploys to Vercel with automatic preview deployments:
 
 | Branch | Domain | Purpose |
 |--------|--------|---------|
-| `main` | escapesuite.io | Production |
+| `main` | escapesuite.tech | Production |
 | `dev` | escapesuite.dev | Development/staging |
 | PRs | `*.vercel.app` | Preview deployments |
 

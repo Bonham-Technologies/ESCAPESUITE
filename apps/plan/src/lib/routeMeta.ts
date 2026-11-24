@@ -23,7 +23,7 @@
  * must agree on it or Search Console reports duplicate/alternate-canonical
  * pages.
  */
-export const SITE_URL = 'https://escapesuite.io'
+export const SITE_URL = 'https://escapesuite.tech'
 
 /**
  * The browsers that both record and export video, as the README's "Browser

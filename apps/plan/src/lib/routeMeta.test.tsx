@@ -80,7 +80,7 @@ describe('applyRouteHead', () => {
     const out = applyRouteHead(indexHtml, '/privacy')
     const body = (html: string) => html.slice(html.indexOf('<body>'))
     expect(body(out)).toBe(body(indexHtml))
-    expect(out).toContain('<meta property="og:image" content="https://escapesuite.io/og.png" />')
+    expect(out).toContain('<meta property="og:image" content="https://escapesuite.tech/og.png" />')
   })
 
   it('escapes HTML in the values it writes', () => {
@@ -97,7 +97,7 @@ describe('applyRouteHead', () => {
     expect(applyRouteHead(minimal, '/terms')).toBe(
       '<head><title>Terms of Service — ESCAPE Suite</title>' +
         `<meta name="description" content="${ROUTE_META['/terms'].description}" />` +
-        '<link rel="canonical" href="https://escapesuite.io/terms" />' +
+        '<link rel="canonical" href="https://escapesuite.tech/terms" />' +
         `${jsonLd(STRUCTURED_DATA_OPERATING_SYSTEM)}</head>`
     )
   })
@@ -153,7 +153,7 @@ describe('structured data (ESCSUITE-465)', () => {
       '@type': 'SoftwareApplication',
       name: 'ESCAPE Suite',
       applicationCategory: 'MultimediaApplication',
-      url: 'https://escapesuite.io/',
+      url: 'https://escapesuite.tech/',
       isAccessibleForFree: true,
       offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
     })
@@ -205,7 +205,7 @@ describe('applyNotFoundHead (ESCSUITE-489)', () => {
     const out = applyNotFoundHead(indexHtml)
     const body = (html: string) => html.slice(html.indexOf('<body>'))
     expect(body(out)).toBe(body(indexHtml))
-    expect(out).toContain('<meta property="og:image" content="https://escapesuite.io/og.png" />')
+    expect(out).toContain('<meta property="og:image" content="https://escapesuite.tech/og.png" />')
     expect(out).not.toMatch(/\n\s*\n\s*<meta name="theme-color"/)
   })
 

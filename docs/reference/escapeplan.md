@@ -36,7 +36,7 @@
   other packages', which the hub's Turbo-cached build would not notice change. Vercel builds
   from a shallow clone, so in production a page keeps its `<lastmod>` only while its last change
   is within the fetched history; older pages are listed without one. `robots.txt`
-  (still in `public/`) names `https://escapesuite.io/sitemap.xml`.
+  (still in `public/`) names `https://escapesuite.tech/sitemap.xml`.
 
 ## Design (ESCSUITE-493)
 

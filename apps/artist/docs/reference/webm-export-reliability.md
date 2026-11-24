@@ -141,3 +141,21 @@ file and no fallback. WebM's shape now matches MP4's:
   log, frame index, total frames — without importing the MP4 module just for its error class. A
   WebM failure that is not already an `ExportError` or an `ExportAbortedError` is wrapped in one
   on the way out, the same catch-all `exportMP4.ts`'s own catch block has always done.
+
+## A muxer write that fails is the export's error, never an unhandled rejection (ESCSUITE-499)
+
+Nobody awaits what a `VideoEncoder`/`AudioEncoder` `output:` callback returns, so a packet source
+`add()` that rejected escaped as an unhandled rejection. Closing the encoders before cancelling
+the muxer (ESCSUITE-159) stops new packets but not the ones already handed over: behind a slow
+picked file their writes are still pending when `cancel()` closes the stream. Each callback now
+catches the rejection into `videoEncoderError`/`audioEncoderError` (first one wins), which the
+frame loop and the pre-finalize check rethrow; after a cancel nothing reads it. A last check
+after `finalize()` catches a packet the encoder delivered during the flush: a real encoder's
+`flush()` does not wait for its callbacks, so that packet's `add()` can still be in the muxer at
+the pre-finalize check, and `finalize()` queues behind it on the muxer's lock. Without that
+check its refusal would be dropped silently and a file missing its last packets reported as
+complete. `exportMP4.ts`
+does the same, though it never cancels its Output and so has no closing-stream case. Tests:
+`exportWebM.test.ts` ("drops a packet whose write was still in flight at Cancel", using the
+mediabunny double's `addGate`) and the refusal cases in both exporters' tests (`addError`, held
+past the pre-finalize check by `addGate` for the flush case).

@@ -13,19 +13,19 @@ Free, open-source (Apache-2.0), privacy-first media creation tools that run enti
 
 ## Use it now
 
-Hosted free at [escapesuite.io](https://escapesuite.io) — no account, no sign-up.
+Hosted free at [escapesuite.tech](https://escapesuite.tech) — no account, no sign-up.
 
 Each hosted app works offline after the first visit: open it once while online (in a browser with service workers), and it then opens, records, edits and exports with no connection, until the browser discards the saved copy (for example, Safari after about seven days without a visit). Your media is never part of that saved copy; it stays in your browser's storage as before.
 
 | App | Description | Try it |
 |-----|-------------|--------|
-| **ESCAPEPLAN** | Landing page & hub | [escapesuite.io](https://escapesuite.io) |
-| **ESCAPECRAFT** | Screen & webcam recorder | [escapesuite.io/craft](https://escapesuite.io/craft) |
-| **ESCAPEARTIST** | Video editor with timeline & effects | [escapesuite.io/artist](https://escapesuite.io/artist) |
+| **ESCAPEPLAN** | Landing page & hub | [escapesuite.tech](https://escapesuite.tech) |
+| **ESCAPECRAFT** | Screen & webcam recorder | [escapesuite.tech/craft](https://escapesuite.tech/craft) |
+| **ESCAPEARTIST** | Video editor with timeline & effects | [escapesuite.tech/artist](https://escapesuite.tech/artist) |
 
 Or download the offline build from [Releases](https://github.com/Bonham-Technologies/ESCAPESUITE/releases/latest) — a single HTML file that runs air-gapped, no internet required.
 
-What it can't do yet, what the hosted site sends, and how to check for yourself that nothing leaves your machine: [Known limitations](https://escapesuite.io/limitations).
+What it can't do yet, what the hosted site sends, and how to check for yourself that nothing leaves your machine: [Known limitations](https://escapesuite.tech/limitations).
 
 Check a download before you use it: every release lists each file's SHA-256 in `SHA256SUMS.txt` and carries a GitHub build-provenance attestation for it, and each build ships with an SPDX SBOM (`.spdx.json`) listing the dependencies inside it. [Verify your download](docs/VERIFY.md) gives the steps for Linux, macOS and Windows. The `-latest.html` files are replaced with every release, so check one against the `SHA256SUMS.txt` from the same release.
 
@@ -57,7 +57,7 @@ Check a download before you use it: every release lists each file's SHA-256 in `
 
 ### ESCAPEPLAN - Landing page & hub
 - Landing page with links to ESCAPECRAFT and ESCAPEARTIST
-- Privacy and terms pages, and a [known limitations](https://escapesuite.io/limitations) page
+- Privacy and terms pages, and a [known limitations](https://escapesuite.tech/limitations) page
 - No accounts, no sign-in, no tracking of personal data
 
 ## Quick start (development)
@@ -134,7 +134,7 @@ Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and 
 ESCAPE Suite is free and will stay free. If it's doing real work for you or your team,
 [sponsoring Bonham Technologies](https://github.com/sponsors/Bonham-Technologies) keeps it
 maintained. Sponsors are listed at [bonham.tech](https://bonham.tech/#sponsors); Maintainer tier
-and up get a logo here and on [escapesuite.io](https://escapesuite.io), and the upper tiers include
+and up get a logo here and on [escapesuite.tech](https://escapesuite.tech), and the upper tiers include
 hours with the maintainer each month.
 
 <!-- sponsors:start -->

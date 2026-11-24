@@ -46,7 +46,7 @@ initializeTheme(themeStorage)
 
 ### Config (`@escapesuite/shared/config`)
 
-Build-time mode detection. `saas` (default) is the hosted build at escapesuite.io with Vercel
+Build-time mode detection. `saas` (default) is the hosted build at escapesuite.tech with Vercel
 Analytics enabled; `standalone` is the offline single-file build with no analytics and no
 network requests.
 

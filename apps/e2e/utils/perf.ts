@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, type CDPSession, type Download, type Page } from '@playwright/test'
-import { ARTIST_URL, openExportAdvancedOptions, openExportDialog } from './artist'
+import { ARTIST_URL, openExportAdvancedOptions, openExportDialog, exportButtonName } from './artist'
 import { NO_LOCAL_FILE_PICKERS } from './filePickers'
 
 /**
@@ -965,7 +965,7 @@ export async function measureExport(
   const download: Download = await withCpuProfile(page, cdp, profileName, async () => {
     const downloadPromise = page.waitForEvent('download', { timeout: 600_000 })
     await page
-      .getByRole('button', { name: format === 'mp4' ? 'Download MP4' : 'Download WebM' })
+      .getByRole('button', { name: exportButtonName(format === 'mp4' ? 'mp4' : 'webm') })
       .last()
       .click()
     return downloadPromise

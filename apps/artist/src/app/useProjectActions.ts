@@ -19,13 +19,14 @@
 import { useCallback, useRef, useState } from 'react';
 import {
   PROJECT_FILE_TYPE,
+  findMissingSources,
   saveProject,
   saveProjectToFile,
   loadProject,
   showOpenProjectDialog,
 } from '../core/projectManager';
 import { FileWriteError, canPickSaveFile, chooseSaveDestination, fileHandleOf, mayWrite } from '../core/saveFile';
-import { ProjectFileError } from '../core/projectFileFormat';
+import { ProjectFileError, missingSourcesRefusal } from '../core/projectFileFormat';
 import { revokeSourceThumbnails } from '../core/storage';
 import { requestStoragePersistence } from '@escapesuite/shared/storage';
 import { analytics } from '../utils/analytics';
@@ -92,6 +93,20 @@ export interface ProjectActions {
   handleProjectLoadDiscardAndLoad: () => Promise<void>;
 }
 
+/**
+ * What a save that wrote a new file without some sources' media says
+ * (ESCSUITE-497). `leftOut` holds each source's quoted name. It does not say
+ * "import it again": an import makes a new source, which the clips that use
+ * the missing one do not pick up.
+ */
+function leftOutNotice(leftOut: string[]): string {
+  const one = leftOut.length === 1;
+  return (
+    `Project saved without the media for ${leftOut.join(', ')}, which ${one ? 'is' : 'are'} no longer stored in this browser. ` +
+    `The clips that use ${one ? 'it' : 'them'} stay in the project, without media.`
+  );
+}
+
 export function useProjectActions({
   project,
   sourceVideos,
@@ -116,34 +131,53 @@ export function useProjectActions({
   const projectFileRef = useRef<FileSystemFileHandle | null>(null);
 
   // Write the project: over the file it came from, to a file picked now, or
-  // (in a browser with no picker) as a download. False when the user
-  // cancelled the picker. The picker and the permission prompt both need the
-  // click's activation, so each is reached before anything is awaited.
-  const writeProject = useCallback(async (saveAs: boolean): Promise<boolean> => {
+  // (in a browser with no picker) as a download. Null when the user cancelled
+  // the picker; otherwise the quoted names of the sources a new file left out
+  // because their media is no longer stored (ESCSUITE-497), usually none. The
+  // picker needs the click's activation, so it is reached before anything is
+  // awaited.
+  const writeProject = useCallback(async (saveAs: boolean): Promise<string[] | null> => {
     const editor = currentEditorBlock();
     if (!canPickSaveFile()) {
       await saveProject(project, sourceVideos, undefined, editor);
-      return true;
+      return [];
     }
-    let handle = saveAs ? null : projectFileRef.current;
-    if (handle) {
-      if (!(await mayWrite(handle))) {
+    const current = saveAs ? null : projectFileRef.current;
+    if (current) {
+      // In place, every source or nothing (ESCSUITE-470), checked before the
+      // permission prompt (ESCSUITE-497): a save that would refuse asks for
+      // nothing. `saveProjectToFile` still refuses a source that went in the
+      // meantime.
+      const missing = await findMissingSources(project, sourceVideos);
+      if (missing.length > 0) throw missingSourcesRefusal(missing);
+      if (!(await mayWrite(current))) {
         throw new FileWriteError(
-          `Not saved: permission to write to "${handle.name}" was not given. Use Save Project As... to choose a file.`
+          `Not saved: permission to write to "${current.name}" was not given. Use Save Project As... to choose a file.`
         );
       }
-    } else {
-      const destination = await chooseSaveDestination(`${project.name || 'project'}.veditor`, PROJECT_FILE_TYPE);
-      if (destination.kind === 'cancelled') return false;
-      if (destination.kind === 'download') {
-        await saveProject(project, sourceVideos, undefined, editor);
-        return true;
-      }
-      handle = destination.handle;
+      await saveProjectToFile(current, project, sourceVideos, undefined, editor);
+      return [];
     }
-    await saveProjectToFile(handle, project, sourceVideos, undefined, editor);
-    projectFileRef.current = handle;
-    return true;
+    // Save As from a project that has a file suggests another name, so the
+    // default answer is a copy rather than the project's own file: replacing
+    // it would empty it, and the media only it may hold would be left out
+    // (ESCSUITE-497). Known now, so the picker is still reached first.
+    const base = project.name || 'project';
+    const suggestedName = saveAs && projectFileRef.current ? `${base} copy.veditor` : `${base}.veditor`;
+    const destination = await chooseSaveDestination(suggestedName, PROJECT_FILE_TYPE);
+    if (destination.kind === 'cancelled') return null;
+    if (destination.kind === 'download') {
+      await saveProject(project, sourceVideos, undefined, editor);
+      return [];
+    }
+    // A file the picker just made (Chromium empties a chosen file as it is
+    // picked), so nothing in it can be lost: a source with no stored bytes is
+    // left out, as the download leaves it out, and the save says so.
+    const leftOut = await saveProjectToFile(destination.handle, project, sourceVideos, undefined, editor, {
+      leaveOutMissing: true,
+    });
+    projectFileRef.current = destination.handle;
+    return leftOut;
   }, [project, sourceVideos]);
 
   const forgetProjectFile = useCallback(() => {
@@ -160,9 +194,11 @@ export function useProjectActions({
     savingRef.current = true;
     setIsSaving(true);
     try {
-      if (!(await writeProject(saveAs))) return;
+      const leftOut = await writeProject(saveAs);
+      if (!leftOut) return;
       analytics.projectSaved();
-      showNotification('Project saved successfully', 'success');
+      if (leftOut.length > 0) showNotification(leftOutNotice(leftOut), 'info');
+      else showNotification('Project saved successfully', 'success');
       // ESCSUITE-468: ask the browser to keep the library the project's media
       // sits in (only the session's first save or import actually asks).
       void requestStoragePersistence();
@@ -300,7 +336,9 @@ export function useProjectActions({
     // fails for any reason did not happen, so the load must not either, and
     // the user has to be able to choose again.
     try {
-      // A cancelled picker saved nothing, so nothing is loaded either.
+      // A cancelled picker saved nothing, so nothing is loaded either. The
+      // load's own notice follows at once, so a left-out source is not named
+      // here: the project it was in is being closed.
       if (!(await writeProject(false))) return;
     } catch (error) {
       console.error('Failed to save current project:', error);

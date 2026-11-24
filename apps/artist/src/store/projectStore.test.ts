@@ -1562,14 +1562,20 @@ describe('projectStore remaining behaviours', () => {
       expect(store().cropClipId).toBe(clip.id)
     })
 
-    it('is not cleared by a selection change — the readers compare it to the selection', () => {
+    // ESCSUITE-500 reversed this: a latch left set reopened crop mode when the
+    // clip was selected again, so the store now clears it when the selection
+    // moves off its clip (`toolLatches.ts`; more cases in toolLatches.test.ts).
+    it('is cleared when the selection moves to another clip, so reselecting shows it closed', () => {
       const first = addClip('clip1', 0)
       addClip('clip2', 4)
+      store().setSelectedClipId(first.id)
       store().setCropClipId(first.id)
 
       store().setSelectedClipId('clip2')
+      expect(store().cropClipId).toBeNull()
 
-      expect(store().cropClipId).toBe(first.id)
+      store().setSelectedClipId(first.id)
+      expect(store().cropClipId).toBeNull()
     })
 
     it('is not part of the undo history', () => {

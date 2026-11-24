@@ -382,9 +382,13 @@
   throw from any of them left the worker alive until the tab closed. Its catch calls the same
   kind of run-once `release` the success path does (the frame manager disposed, the worker
   terminated, the image URLs revoked — once) and closes whatever its own `openEncoders` list
-  holds. The composer takes
-  the output `frameRate` because the seek tolerance is a little under half a frame of it —
-  the one value that had to become a parameter, 30 for WebM and 10/15/20 for GIF.
+  holds. The composer takes the output `frameRate` (30 for WebM, 10/15/20 for GIF): it
+  skips a seek only within 0.4 of a frame of it, and since ESCSUITE-505 only when the
+  element also shows the frame the seek would, at the source's own rate
+  (`ElementSources.frameRates`, filled by `loadElementSources` from `SourceVideo.frameRate`
+  when its `frameRateSource` is `'measured'` or `'configured'`; `elementShowsFrameFor` in
+  `elementSeek.ts`). A source whose rate was only assumed (every Firefox import) skips a
+  seek only when the element already sits at the request (`elementSitsAt`).
   `exportMP4.ts` is deliberately
   **not** a caller: it decodes through `videoDecodeManager.ts` / `frameSource.ts` and draws
   `VideoFrame`s, so it shares `canvasRenderer.ts` but not this. The extraction is a pure

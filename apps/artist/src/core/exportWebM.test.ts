@@ -470,9 +470,25 @@ describe('exportToWebM rendering', () => {
   it('seeks a sped clip to the source time its speed puts under each frame (ESCSUITE-471)', async () => {
     await run({
       clips: [makeClip({ startTime: 2, duration: CLIP_DURATION, endTime: 2 + CLIP_DURATION / 2, speed: 0.5 })],
+      // A rate something stands behind (an ESCAPECRAFT take's configured 30):
+      // an assumed one is never judged by its grid at all.
+      sources: [makeSourceVideo({ width: 640, height: 360, frameRateSource: 'configured' })],
     })
 
-    // Half a source frame per timeline frame.
+    // Half a 30 fps source frame per timeline frame. Every request is seeked,
+    // although every other one is on the frame of the 30 fps grid the element
+    // already shows: each is over 0.4 of an output frame from the last, and a
+    // source recorded as 30 fps may be an off-grid take or a 60 fps file
+    // (ESCSUITE-505's output-frame ceiling).
+    expect(media.seeks.slice(1)).toEqual([0, 1, 2, 3, 4, 5].map((i) => elementSeekTarget(2 + i / 60)))
+  })
+
+  it('seeks a sped clip of a 60 fps source on every new source frame (ESCSUITE-471, ESCSUITE-505)', async () => {
+    await run({
+      clips: [makeClip({ startTime: 2, duration: CLIP_DURATION, endTime: 2 + CLIP_DURATION / 2, speed: 0.5 })],
+      sources: [makeSourceVideo({ width: 640, height: 360, frameRate: 60, frameRateSource: 'measured' })],
+    })
+
     expect(media.seeks.slice(1)).toEqual([0, 1, 2, 3, 4, 5].map((i) => elementSeekTarget(2 + i / 60)))
   })
 
@@ -1092,6 +1108,87 @@ describe('exportToWebM muxer cancellation', () => {
     expect(log).toContain('Output.cancel')
     expect(log.indexOf('VideoEncoder.close')).toBeLessThan(log.indexOf('Output.cancel'))
     expect(log.indexOf('AudioEncoder.close')).toBeLessThan(log.indexOf('Output.cancel'))
+  })
+
+  it('drops a packet whose write was still in flight at Cancel, with no unhandled rejection (ESCSUITE-499)', async () => {
+    // Closing the encoders first stops new packets, but not the ones already
+    // handed to the muxer: behind a slow file their writes are still pending
+    // when the output is cancelled, and land on a stream that is closing. The
+    // rejection comes back out of the `output:` callback, which nobody awaits.
+    const rejections: unknown[] = []
+    const onRejection = (reason: unknown) => rejections.push(reason)
+    process.on('unhandledRejection', onRejection)
+    let release = () => {}
+    getMediabunnyState().addGate = new Promise<void>((resolve) => (release = resolve))
+    const controller = new AbortController()
+    try {
+      await expect(
+        run({
+          signal: controller.signal,
+          onProgress: (p) => {
+            if (p.message?.startsWith('Encoding frame 5/')) controller.abort()
+          },
+        })
+      ).rejects.toBeInstanceOf(ExportAbortedError)
+      expect(lastMediabunnyOutput().state).toBe('canceled')
+
+      release()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(getMediabunnyState().lateWrites).toBeGreaterThan(0)
+      expect(rejections).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onRejection)
+    }
+  })
+
+  it('fails the export with the muxer\'s refusal of an audio packet, before finalizing (ESCSUITE-499)', async () => {
+    getMediabunnyState().addError = new Error('Audio parameters must remain constant')
+    getMediabunnyState().addErrorKind = 'audio'
+    mixAudio.mockResolvedValue(audioFor(0.2))
+
+    const failure = await run().catch((e: unknown) => e)
+
+    expect(failure).toBeInstanceOf(ExportError)
+    expect((failure as ExportError).message).toContain('Audio parameters must remain constant')
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
+  })
+
+  it('fails the export with the muxer\'s refusal of a packet still being added at the flush, instead of reporting success (ESCSUITE-499)', async () => {
+    // The pre-finalize check cannot see a packet whose add() is still in the
+    // muxer when it runs (a real encoder's flush() does not wait for its
+    // callbacks). Hold the last frame's add past that check, then refuse it.
+    let release = () => {}
+    const failure = await run({
+      onProgress: (p) => {
+        if (p.message?.startsWith('Encoding frame 5/')) {
+          getMediabunnyState().addGate = new Promise<void>((resolve) => (release = resolve))
+        }
+        if (p.phase === 'muxing') {
+          getMediabunnyState().addError = new Error('Timestamps must be monotonically increasing')
+          release()
+        }
+      },
+    }).catch((e: unknown) => e)
+
+    expect(failure).toBeInstanceOf(ExportError)
+    expect((failure as ExportError).message).toContain('Timestamps must be monotonically increasing')
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(1)
+  })
+
+  it('fails the export with the muxer\'s refusal of a packet, instead of an unhandled rejection (ESCSUITE-499)', async () => {
+    // At the next frame, as an encoder error is: not first at the flush, which
+    // the real VideoEncoder resolves without waiting for its callbacks.
+    getMediabunnyState().addError = new Error('Video sample size must remain constant')
+
+    const failure = await run().catch((e: unknown) => e)
+
+    expect(failure).toBeInstanceOf(ExportError)
+    expect((failure as ExportError).message).toContain('Video sample size must remain constant')
+    expect(webcodecs.videoEncoders[0].encodes.length).toBeLessThan(6)
+    expect(webcodecs.videoEncoders[0].flushes).toBe(0)
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
+    expect(lastMediabunnyOutput().state).toBe('canceled')
   })
 
   it('reports the export failure, not the muxer, when the cancel itself fails', async () => {
