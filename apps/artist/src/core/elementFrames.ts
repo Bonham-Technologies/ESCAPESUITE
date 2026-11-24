@@ -26,7 +26,7 @@ import { stackCaptions } from './captionStack';
 import { sourceTimeAt } from '../store/clipSpeed';
 import { getAnimatedValues } from '../utils/animation';
 import { openOutputFrame, type PixelSize } from './outputTransform';
-import { elementSeekTarget } from './elementSeek';
+import { elementSeekTarget, elementShowsFrameFor, elementSitsAt } from './elementSeek';
 import { watchPresentedFrame, type PresentedFrameWatch } from './presentedFrame';
 import {
   SourceNotSeekableError,
@@ -75,6 +75,17 @@ export interface ElementSources {
    * source whose seeks never complete fails the export with (ESCSUITE-305).
    */
   sourceNames: Map<string, string>;
+  /**
+   * Each loaded `<video>`'s source frame rate — its `SourceVideo.frameRate` —
+   * for the seek decision (`elementShowsFrameFor`, ESCSUITE-505), only where
+   * something stands behind it: `frameRateSource` `'measured'` (an import in
+   * Chromium) or `'configured'` (an ESCAPECRAFT take). A rate nobody measured
+   * — `'assumed'`, which every import in Firefox is (ESCSUITE-327), or absent,
+   * which reads the same — and a source the export was not handed the record of
+   * have no entry: the composer then skips a seek only for a request the element
+   * already answered (`elementSitsAt`).
+   */
+  frameRates: Map<string, number>;
 }
 
 /**
@@ -124,6 +135,7 @@ export async function loadElementSources(
   const imageElements: Map<string, HTMLImageElement> = new Map();
   const extraVideoElements: Map<string, (HTMLVideoElement | null)[]> = new Map();
   const sourceNames: Map<string, string> = new Map();
+  const frameRates: Map<string, number> = new Map();
 
   // Get unique source IDs, filtering out empty ones (overlay clips have no sourceVideoId)
   const uniqueSourceIds = [...new Set(clips.map(c => c.sourceVideoId).filter(id => id && id.length > 0))];
@@ -156,6 +168,7 @@ export async function loadElementSources(
           videoElements.set(sourceId, video);
           extraVideoElements.set(sourceId, []);
           sourceNames.set(sourceId, mediaName);
+          if (source && hasKnownFrameRate(source)) frameRates.set(sourceId, source.frameRate);
         } catch (e) {
           console.warn(`Failed to load video ${sourceId}, trying as image:`, e);
           // Try loading as image as fallback
@@ -172,11 +185,11 @@ export async function loadElementSources(
     // Nothing reaches a caller, so nothing else could free what is already
     // loaded. Both media branches warn and skip, so the only ways here are a
     // failed storage read and a source with no bytes (ESCSUITE-330).
-    releaseElementSources({ videoElements, imageElements, extraVideoElements, sourceNames });
+    releaseElementSources({ videoElements, imageElements, extraVideoElements, sourceNames, frameRates });
     throw e;
   }
 
-  return { videoElements, imageElements, extraVideoElements, sourceNames };
+  return { videoElements, imageElements, extraVideoElements, sourceNames, frameRates };
 }
 
 /**
@@ -235,6 +248,15 @@ export function createElementSourceRelease(sources: ElementSources): () => void 
   };
 }
 
+/**
+ * Whether `source`'s frame rate is one something stands behind — measured from
+ * its presented frames at import, or the rate ESCAPECRAFT was configured to
+ * record at — rather than a placeholder (ESCSUITE-276, ESCSUITE-505).
+ */
+function hasKnownFrameRate(source: SourceVideo): boolean {
+  return source.frameRateSource === 'measured' || source.frameRateSource === 'configured';
+}
+
 /** What {@link syncVideoToTime} did, for the wedge count and the diagnostic log. */
 interface SyncOutcome {
   /** Whether it assigned `currentTime`. */
@@ -249,8 +271,23 @@ interface SyncOutcome {
 /**
  * Sync a video to a target time. Seeks to just past the target
  * (`elementSeekTarget`, ESCSUITE-265) for frame-accurate export, skipping the
- * seek when the element is already within (a little under) half an output
- * frame of it.
+ * seek only when the element is within (a little under) half an output frame
+ * of it **and** already shows the frame of the source the seek would
+ * (`elementShowsFrameFor`, ESCSUITE-505): the same frame of the source's own
+ * rate, and within half of one. The output-frame window alone, whatever the
+ * clip's speed, let a slowed clip of a high-rate source — whose requests are
+ * closer together in source time than an output frame — skip seeks to the next
+ * source frame and repeat the one before. It stays as a ceiling: half a frame
+ * of a source recorded at 30 fps is wider than 0.4 of a 30 fps output frame,
+ * and inside that band only the source's ideal frame grid would decide, which
+ * is wrong for an ESCAPECRAFT take (capture-time timestamps) or a 60 fps file
+ * recorded as 30 — a 0.5x clip of one would repeat every other frame.
+ *
+ * A source whose rate nobody measured (`sourceFrameRate` undefined: every
+ * import in Firefox, ESCSUITE-327) has no grid to judge by — a 50 fps file is
+ * stored at a placeholder 30 — so its seek is skipped only when the element
+ * already sits at the request or its seek target (`elementSitsAt`): a slowed
+ * clip of it seeks once per output frame, as a clip at 1x does.
  *
  * Resolves to what the request did: above all whether a seek it issued landed
  * ('seeked' fired) — what the wedge count reads alongside the element's state
@@ -260,18 +297,22 @@ interface SyncOutcome {
 async function syncVideoToTime(
   video: HTMLVideoElement,
   targetTime: number,
-  frameRate: number
+  outputFrameRate: number,
+  sourceFrameRate: number | undefined
 ): Promise<SyncOutcome> {
   const started = performance.now();
   let seekLanded = false;
   let issued = false;
-  // Skip if already within (a little under) half a frame of the target.
-  const frameDuration = 1 / frameRate;
   // The sought frame's callback, registered before the seek so it cannot miss
   // it: Chromium can fire 'seeked' while the element still paints the frame
   // from before the seek (ESCSUITE-454, `presentedFrame.ts`).
   let presented: PresentedFrameWatch | undefined;
-  if (Math.abs(video.currentTime - targetTime) > frameDuration * 0.4) {
+  const withinOutputWindow = Math.abs(video.currentTime - targetTime) <= (1 / outputFrameRate) * 0.4;
+  const showsRequestedFrame =
+    sourceFrameRate === undefined
+      ? elementSitsAt(video.currentTime, targetTime)
+      : withinOutputWindow && elementShowsFrameFor(video.currentTime, targetTime, sourceFrameRate);
+  if (!showsRequestedFrame) {
     issued = true;
     presented = watchPresentedFrame(video);
     // Just past the target: a target on a frame's exact start would otherwise
@@ -357,7 +398,11 @@ export interface FrameComposerParams {
   projectSize: PixelSize;
   outputSize: PixelSize;
   drawOptions: MediaDrawOptions;
-  /** Output frame rate — the seek tolerance is a little under half a frame of it. */
+  /**
+   * Output frame rate. A seek is skipped only within a little under half an
+   * output frame of the element's time, and then only on the source frame it
+   * already shows (ESCSUITE-505).
+   */
   frameRate: number;
   /**
    * The export's diagnostic log (ESCSUITE-412). Every seek request that did
@@ -399,7 +444,7 @@ export function createFrameComposer({
   frameRate,
   log = () => {},
 }: FrameComposerParams): FrameComposer {
-  const { videoElements, imageElements, extraVideoElements, sourceNames } = sources;
+  const { videoElements, imageElements, extraVideoElements, sourceNames, frameRates } = sources;
   // Consecutive wedged seeks per element (ESCSUITE-305): one integer per
   // element, compared once per seek, on a path that already waits on it. Keyed
   // by element, not by source — a source's further elements (ESCSUITE-313) each
@@ -432,7 +477,7 @@ export function createFrameComposer({
     sourceTime: number
   ): Promise<string | undefined> => {
     const atStart = wedgeCountAtStart(wedgedSeeks.get(video) ?? 0, video);
-    const outcome = await syncVideoToTime(video, sourceTime, frameRate);
+    const outcome = await syncVideoToTime(video, sourceTime, frameRate, frameRates.get(sourceId));
     const wedged = nextWedgeCount(atStart, video, outcome.landed);
     wedgedSeeks.set(video, wedged);
     if ((outcome.issued && !outcome.landedPromptly) || wedged > atStart) {

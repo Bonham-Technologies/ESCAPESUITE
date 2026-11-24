@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   FileWriteError,
   canPickSaveFile,
+  mayPickSaveFile,
   chooseSaveDestination,
   fileHandleOf,
   fileWriteError,
@@ -26,6 +27,44 @@ describe('canPickSaveFile', () => {
     expect(canPickSaveFile()).toBe(false)
     uninstall = installSavePicker(async () => fakeFileHandle('a.webm').handle)
     expect(canPickSaveFile()).toBe(true)
+  })
+})
+
+// ESCSUITE-498: what the export buttons go by.
+describe('mayPickSaveFile', () => {
+  it('is false without the save picker', () => {
+    expect(mayPickSaveFile()).toBe(false)
+  })
+
+  it('is true with it, in the top-level page or a frame from the same origin', () => {
+    uninstall = installSavePicker(async () => fakeFileHandle('a.webm').handle)
+    expect(mayPickSaveFile()).toBe(true)
+    const top = vi.spyOn(window, 'top', 'get').mockReturnValue({ location: { origin: window.location.origin } } as unknown as Window)
+    try {
+      expect(mayPickSaveFile()).toBe(true)
+    } finally {
+      top.mockRestore()
+    }
+  })
+
+  it('is false in a frame from another origin, whose picker the browser refuses', () => {
+    uninstall = installSavePicker(async () => fakeFileHandle('a.webm').handle)
+    const crossOrigin = vi.spyOn(window, 'top', 'get').mockReturnValue({
+      get location(): Location {
+        throw domError('SecurityError')
+      },
+    } as unknown as Window)
+    try {
+      expect(mayPickSaveFile()).toBe(false)
+    } finally {
+      crossOrigin.mockRestore()
+    }
+    const otherOrigin = vi.spyOn(window, 'top', 'get').mockReturnValue({ location: { origin: 'https://host.example' } } as unknown as Window)
+    try {
+      expect(mayPickSaveFile()).toBe(false)
+    } finally {
+      otherOrigin.mockRestore()
+    }
   })
 })
 

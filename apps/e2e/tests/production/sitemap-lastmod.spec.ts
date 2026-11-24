@@ -13,7 +13,7 @@ import { test, expect } from '@playwright/test'
  * `scripts/serve-dist.mjs` (port 5190).
  */
 const BASE = 'http://localhost:5190'
-const ORIGIN = 'https://escapesuite.io'
+const ORIGIN = 'https://escapesuite.tech'
 const HUB_PAGES = ['/', '/privacy', '/terms', '/limitations']
 
 /** W3C Datetime as sitemaps.org accepts it: a date, or a date and time with a zone. */

@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test'
-import { ARTIST_URL, makeToneWav, openExportAdvancedOptions, openExportDialog } from '../../utils/artist'
+import { ARTIST_URL, makeToneWav, openExportAdvancedOptions, openExportDialog, exportButtonName } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
 /**
@@ -96,9 +96,9 @@ test.describe('ESCSUITE-385: a timeline over three hours says why export is off,
     await expect(notice).toBeVisible()
     await expect(notice).toHaveText(KEYS)
 
-    await expectVisibleReason(page, page.getByRole('button', { name: 'Download WebM' }))
+    await expectVisibleReason(page, page.getByRole('button', { name: exportButtonName('webm') }))
     await openExportAdvancedOptions(page)
-    await expectVisibleReason(page, page.getByRole('button', { name: /^Download (WebM|MP4|GIF)$/ }).last())
+    await expectVisibleReason(page, page.getByRole('button', { name: exportButtonName() }).last())
   })
 
   test('with a section set, only the full-video export is off, and it says why', async ({ page }) => {

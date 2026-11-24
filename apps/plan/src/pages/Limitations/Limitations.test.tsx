@@ -23,7 +23,7 @@ describe('Limitations', () => {
     renderPage()
     expect(document.title).toBe('Known limitations — ESCAPE Suite')
     const canonical = document.head.querySelector('link[rel="canonical"]')
-    expect(canonical).toHaveAttribute('href', 'https://escapesuite.io/limitations')
+    expect(canonical).toHaveAttribute('href', 'https://escapesuite.tech/limitations')
   })
 
   it('renders every limitation as its own section, with its sources', () => {

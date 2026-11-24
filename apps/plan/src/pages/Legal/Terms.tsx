@@ -28,7 +28,7 @@ export default function Terms() {
         </p>
         <p>
           The ESCAPE Suite software is open source under the Apache License, Version 2.0; these terms govern use of the
-          hosted service at escapesuite.io.
+          hosted service at escapesuite.tech.
         </p>
 
         <h2>2. Description of Services</h2>
@@ -51,7 +51,7 @@ export default function Terms() {
           </li>
         </ul>
         <p>
-          You can use ESCAPE Suite at escapesuite.io, or download a single-file offline build (available
+          You can use ESCAPE Suite at escapesuite.tech, or download a single-file offline build (available
           from our GitHub Releases) to run entirely on your own device without an internet connection.
           Either way, our applications process video content locally on your device. We do not upload,
           store, or process your video recordings on our servers.

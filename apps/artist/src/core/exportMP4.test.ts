@@ -1209,6 +1209,58 @@ describe('exportToMP4 failure handling', () => {
     expect(error.exportLog[0]).toMatchObject({ phase: 'init' })
     expect(webcodecs.videoEncoders[0].state).toBe('closed')
   })
+
+  // ESCSUITE-499, as on the WebM side: nobody awaits an `output:` callback,
+  // so a packet the muxer refuses must fail the export, not reject into the
+  // page. (The WebM side's other case, a write still in flight when Cancel
+  // closes the stream, has no MP4 twin: this exporter never cancels its Output.)
+  it('fails the export with the muxer\'s refusal of an audio packet, before finalizing (ESCSUITE-499)', async () => {
+    getMediabunnyState().addError = new Error('Audio parameters must remain constant')
+    getMediabunnyState().addErrorKind = 'audio'
+    mixAudio.mockResolvedValue(audioFor(0.2))
+
+    const failure = await run().catch((e: unknown) => e)
+
+    expect(failure).toBeInstanceOf(ExportError)
+    expect((failure as ExportError).message).toContain('Audio parameters must remain constant')
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
+  })
+
+  it('fails the export with the muxer\'s refusal of a packet still being added at the flush, instead of reporting success (ESCSUITE-499)', async () => {
+    // The pre-finalize check cannot see a packet whose add() is still in the
+    // muxer when it runs (a real encoder's flush() does not wait for its
+    // callbacks). Hold the last frame's add past that check, then refuse it.
+    let release = () => {}
+    const failure = await run({
+      onProgress: (p) => {
+        if (p.message?.startsWith('Encoding frame 5/')) {
+          getMediabunnyState().addGate = new Promise<void>((resolve) => (release = resolve))
+        }
+        if (p.phase === 'muxing') {
+          getMediabunnyState().addError = new Error('Timestamps must be monotonically increasing')
+          release()
+        }
+      },
+    }).catch((e: unknown) => e)
+
+    expect(failure).toBeInstanceOf(ExportError)
+    expect((failure as ExportError).message).toContain('Timestamps must be monotonically increasing')
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(1)
+  })
+
+  it('fails the export with the muxer\'s refusal of a packet, instead of an unhandled rejection (ESCSUITE-499)', async () => {
+    // At the next frame, as an encoder error is: not first at the flush, which
+    // the real VideoEncoder resolves without waiting for its callbacks.
+    getMediabunnyState().addError = new Error('Video sample size must remain constant')
+
+    const failure = await run().catch((e: unknown) => e)
+
+    expect(failure).toBeInstanceOf(ExportError)
+    expect((failure as ExportError).message).toContain('Video sample size must remain constant')
+    expect(webcodecs.videoEncoders[0].encodes.length).toBeLessThan(6)
+    expect(webcodecs.videoEncoders[0].flushes).toBe(0)
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
+  })
 })
 
 describe('exportToMP4 loudness (ESCSUITE-292)', () => {

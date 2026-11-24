@@ -7,25 +7,25 @@
     "sha256": "1c9416e51deff6f20e70832881713971542ae5ec3f01a86fc85e6d88906f9369"
   },
   "/privacy": {
-    "lastmod": "2026-11-15",
+    "lastmod": "2026-11-24",
     "sources": [
       "src/pages/Legal/Privacy.tsx"
     ],
-    "sha256": "525e21bfa80fa2f3f844b16eee431514a524a247487386111e37f691df3f7d23"
+    "sha256": "a791d80b20761282059051275255e11c9fbdf451145feddbdf4b1c4764f22d1d"
   },
   "/terms": {
-    "lastmod": "2026-11-15",
+    "lastmod": "2026-11-24",
     "sources": [
       "src/pages/Legal/Terms.tsx"
     ],
-    "sha256": "a838796d6ad71eb8461eff2d1abda99a5b669704e88213d850f25a4a231a7959"
+    "sha256": "917eda6963a6673cd0b562171902f8aa1007e94b27da4cc6b243b81bfa3a8ad5"
   },
   "/limitations": {
-    "lastmod": "2026-11-20",
+    "lastmod": "2026-11-24",
     "sources": [
       "src/pages/Limitations/Limitations.tsx",
       "src/pages/Limitations/limitations.ts"
     ],
-    "sha256": "651e7b8777b8057e160242a1b167256bebfcbdf3a2abc330841ecc077a87933f"
+    "sha256": "fd8b4437f7bf7c6126a4eaa5bb0b374d4ac0a891435132a165c6adb9ad5f4554"
   }
 }

@@ -39,7 +39,7 @@
   sources). `apps/e2e/tests/production/sitemap-lastmod.spec.ts` checks every hub page in the
   built `sitemap.xml` carries one. The tools never get one: their sources are other packages',
   which the hub's Turbo-cached build would not notice change. `robots.txt`
-  (still in `public/`) names `https://escapesuite.io/sitemap.xml`.
+  (still in `public/`) names `https://escapesuite.tech/sitemap.xml`.
 
 ## Design (ESCSUITE-493)
 

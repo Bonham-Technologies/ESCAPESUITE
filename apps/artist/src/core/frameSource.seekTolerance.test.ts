@@ -87,6 +87,17 @@ describe('HTMLVideoFrameSource seek tolerance (ESCSUITE-263)', () => {
     expect(el.seeks).toEqual([elementSeekTarget(2)]);
   });
 
+  // ESCSUITE-505: half a frame is a window around where the element sits, not
+  // the frame it shows. A slowed clip's requests are closer together than a
+  // source frame, and one just past a frame start, from an element sitting just
+  // before it, is inside the window but on the next frame.
+  it('seeks for a request on the next frame even when it is closer than half a frame', async () => {
+    const { el, source } = sourceFor(60);
+    await source.getFrame(2 + 0.7 / 60); // frame 120, the element 1 ms past it
+    await source.getFrame(2 + 1.1 / 60); // frame 121, 0.4 frames from the request before
+    expect(el.seeks).toEqual([2 + 0.7 / 60, 2 + 1.1 / 60].map(elementSeekTarget));
+  });
+
   it('uses the 30 fps fallback when the rate is unknown', async () => {
     const near = sourceFor(undefined);
     await near.source.getFrame(2);

@@ -12,7 +12,10 @@
   export or save. Every e2e config launches Chromium with
   `--disable-blink-features=FileSystemAccessLocal` (`apps/e2e/utils/filePickers.ts`), so specs that
   wait for a download keep getting one; `tests/regressions/ESCSUITE-470.spec.ts` stubs the pickers
-  with origin-private file system handles to test the picked-file path.
+  with origin-private file system handles to test the picked-file path. With a picker, ARTIST's
+  export buttons read "Export WebM…" rather than "Download WebM" (ESCSUITE-498), so specs select
+  them with `exportButtonName('webm' | 'mp4' | 'gif')` from `apps/e2e/utils/artist.ts`, which
+  matches either wording.
 - **E2E retries** (ESCSUITE-352): CI retries a failing test twice, except in the `chromium-strict`
   project, which runs `tests/journeys/**/*.spec.ts`, the ARTIST soaks
   (`tests/escapeartist/*soak.spec.ts`: `soak` and `import-soak`) and
@@ -195,6 +198,16 @@ itself, so each case also runs with a `VideoEncoder` wrapper clearing it to "unk
 Firefox's encoder leaves it: that variant is what fails in Chromium when the app's rewrite
 (`vp9ColourSpace.ts`) breaks. Firefox runs it in the Nightly and in `e2e-cross-browser` when the
 spec changes.
+
+**Colour through the import's seek-index repair** (ESCSUITE-504).
+`regressions/ESCSUITE-504.spec.ts` imports MediaRecorder WebMs of eight drawn colour patches into
+ARTIST. Two are committed recordings, Firefox 159's VP8 and Chromium 159's VP9 with its Cues
+emptied (`fixtures/mediarecorder-colour`); the third is recorded afresh by the running browser. It
+reads the patches with a plain `<video>` and with the preview canvas, before the repair (the
+stored row put back to the original bytes, then the session restored) and after it. It fails when
+the repair changes a video packet or moves a colour by more than 2/255. The colours against the
+drawn RGB are annotations; ARTIST's `seek-index-repair-at-import.md` records them. It skips in
+WebKit, which cannot import media under Playwright.
 
 **Blind spots.** Workers started from `blob:` or `data:` URLs (the single-file builds inline theirs
 that way), workers started by a worker (Playwright does not route their script requests), shared

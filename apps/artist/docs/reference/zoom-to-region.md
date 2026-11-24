@@ -22,7 +22,10 @@
 
 The tool is a latch in the UI slice, `zoomRegionClipId`, read exactly like crop mode's
 `cropClipId`: it shows only while it names the selected clip, on a visible track, with a video
-source, and never while crop mode is open. View state: not in the project, the undo history or a
+source, and never while crop mode is open. The store clears both latches whenever
+`selectedClipId` changes to another clip or to none, a delete or an undo that prunes the selection
+included (`store/toolLatches.ts`, ESCSUITE-500), so selecting the clip again shows the tool
+closed; a write that keeps the same `selectedClipId` leaves it open. View state: not in the project, the undo history or a
 saved file. The picker layer hides during playback; the form stays. While the tool is open the
 canvas' own pointer handling is off and the transform handles are not drawn, as in crop mode.
 

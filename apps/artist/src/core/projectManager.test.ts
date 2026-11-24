@@ -3,6 +3,7 @@ import { File as NodeFile } from 'node:buffer'
 import {
   exportProjectMetadata,
   extractMetadataFromBlob,
+  findMissingSources,
   importProjectMetadata,
   loadProject,
   saveProject,
@@ -16,6 +17,7 @@ import {
   MAX_INDEX_BYTES,
   ProjectFileError,
   encodeProjectFile,
+  missingSourcesRefusal,
   readProjectFileIndex,
   sliceRange,
   type ProjectFileIndex,
@@ -474,6 +476,42 @@ describe('saveProject', () => {
     )
     expect(picked.streams).toHaveLength(0)
     expect(picked.bytes()).toEqual([7])
+  })
+
+  // ESCSUITE-497: a file the save picker just made holds nothing to lose, so
+  // a first Save or a Save As writes what the download would, leaving out the
+  // sources with no bytes, and answers their names for the notice.
+  it('writes a new picked file without the sources that have no stored bytes when told to, and names them', async () => {
+    const storedId = uniqueId('kept')
+    const goneId = uniqueId('gone')
+    const unlistedId = uniqueId('unlisted')
+    await storeVideo(storedId, new Blob([new Uint8Array([1, 2])], { type: 'video/mp4' }), sourceVideo(storedId))
+    const project = createTestProject(storedId)
+    project.timeline.clips.push(
+      { ...project.timeline.clips[0], id: 'clip2', sourceVideoId: goneId },
+      { ...project.timeline.clips[0], id: 'clip3', sourceVideoId: unlistedId }
+    )
+    const library = [sourceVideo(storedId), { ...sourceVideo(goneId), name: 'take-1.webm' }]
+    const picked = fakeFileHandle('p.veditor')
+
+    const leftOut = await saveProjectToFile(picked.handle, project, library, undefined, undefined, { leaveOutMissing: true })
+    await saveProject(project, library)
+
+    expect(leftOut).toEqual([`"${unlistedId}"`, '"take-1.webm"'])
+    const written = picked.bytes()!
+    const downloaded = new Uint8Array(await (await capturedSave()).file.arrayBuffer())
+    expect(written).toEqual([...downloaded])
+    const loaded = await readProjectFileIndex(fileOf([new Uint8Array(written)], 'p.veditor'))
+    expect(loaded!.index.videos.map((v) => v.id)).toEqual([storedId])
+  })
+
+  it('answers no names when every source is stored', async () => {
+    const id = uniqueId('all')
+    await storeVideo(id, new Blob([new Uint8Array([1])], { type: 'video/mp4' }), sourceVideo(id))
+
+    const leftOut = await saveProjectToFile(fakeFileHandle('p.veditor').handle, createTestProject(id), [sourceVideo(id)])
+
+    expect(leftOut).toEqual([])
   })
 
   it('names the file "project.veditor" when the project has no name', async () => {
@@ -3082,5 +3120,49 @@ describe('loadProject rebuilds a missing waveform once per browser (ESCSUITE-361
     expect((await getVideo(id))?.metadata).toMatchObject({ waveformData: peaks })
     expect((await getVideo(id))?.metadata.waveformUnavailable).toBeUndefined()
     await deleteVideo(id)
+  })
+})
+
+// ESCSUITE-497: the check an in-place Save makes before it asks for anything.
+describe('findMissingSources', () => {
+  it('names each used source with no stored bytes, and each the library no longer lists, by id', async () => {
+    const storedId = uniqueId('kept')
+    const goneId = uniqueId('gone')
+    const unlistedId = uniqueId('unlisted')
+    const unusedId = uniqueId('unused')
+    await storeVideo(storedId, new Blob([new Uint8Array([1])], { type: 'video/mp4' }), sourceVideo(storedId))
+    const project = createTestProject(storedId)
+    project.timeline.clips.push(
+      { ...project.timeline.clips[0], id: 'clip2', sourceVideoId: goneId },
+      { ...project.timeline.clips[0], id: 'clip3', sourceVideoId: unlistedId },
+      // An overlay clip uses no source.
+      { ...project.timeline.clips[0], id: 'clip4', sourceVideoId: '' }
+    )
+    const library = [sourceVideo(storedId), { ...sourceVideo(goneId), name: 'take-1.webm' }, sourceVideo(unusedId)]
+
+    expect(await findMissingSources(project, library)).toEqual([`"${unlistedId}"`, '"take-1.webm"'])
+  })
+
+  it('answers nothing when every used source is stored', async () => {
+    const id = uniqueId('all')
+    await storeVideo(id, new Blob([new Uint8Array([1])], { type: 'video/mp4' }), sourceVideo(id))
+
+    expect(await findMissingSources(createTestProject(id), [sourceVideo(id)])).toEqual([])
+  })
+})
+
+describe('missingSourcesRefusal', () => {
+  it('names one source, or several, and points at Save Project As...', () => {
+    expect(missingSourcesRefusal(['"a.webm"']).message).toBe(
+      'Not saved: the media for "a.webm" is no longer stored in this browser, so the project file would lose it. ' +
+        'The file was left as it was. Remove the clips that use it, then save. ' +
+        'Or use Save Project As... to save a copy under a different name: replacing this file would lose that media.'
+    )
+    expect(missingSourcesRefusal(['"a.webm"', '"b.mp4"']).message).toBe(
+      'Not saved: the media for "a.webm", "b.mp4" are no longer stored in this browser, so the project file would lose them. ' +
+        'The file was left as it was. Remove the clips that use them, then save. ' +
+        'Or use Save Project As... to save a copy under a different name: replacing this file would lose that media.'
+    )
+    expect(missingSourcesRefusal(['"a"'])).toBeInstanceOf(ProjectFileError)
   })
 })

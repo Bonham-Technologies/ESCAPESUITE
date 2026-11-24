@@ -12,7 +12,7 @@
 
 import { VideoDecodeManager } from './videoDecodeManager';
 import { isMeasuredWorkerDecodeEngine } from './workerDecodeEngine';
-import { elementSeekTarget } from './elementSeek';
+import { elementSeekTarget, elementShowsFrameFor } from './elementSeek';
 import { countWedgedSeek, settleSeekInFlight, wedgeCountAtStart } from './seekWedge';
 import { watchPresentedFrame, type PresentedFrameWatch } from './presentedFrame';
 import { ExportAbortedError, loadVideoElementFromUrl } from './exportTypes';
@@ -167,24 +167,7 @@ export class WebCodecsFrameSource implements IFrameSource {
   }
 }
 
-/**
- * How far from the element's current time a request may be before the `<video>`
- * path seeks: half of one frame at the source's own rate, since anything closer
- * is the frame already showing and anything further is a different one
- * (ESCSUITE-263). The rate is floored at 30 because the export asks for frames
- * 1/30 s apart: below 15 fps a half-frame window would be wider than that spacing
- * and serve the previous frame across a boundary. A rate that is missing or not
- * finite and positive counts as 30 too. An imported video's rate is measured
- * at import (ESCSUITE-276, `frameRateSource: 'measured'`); a rate the probe
- * could not measure, an ESCAPECRAFT take (`'configured'`) and every source
- * imported before then carry 30, so they get the 1/60 s window. The element
- * itself sits `ELEMENT_SEEK_BIAS` past the last request it was seeked for
- * (`elementSeek.ts`, ESCSUITE-265), far inside this window.
- */
-export function seekToleranceFor(frameRate: number | undefined): number {
-  const rate = frameRate !== undefined && Number.isFinite(frameRate) && frameRate > 0 ? frameRate : 30;
-  return 0.5 / Math.max(rate, 30);
-}
+export { seekToleranceFor } from './elementSeek';
 
 /**
  * A muted, inline `<video>` over `url`, once its first frame has loaded.
@@ -232,7 +215,8 @@ export class HTMLVideoFrameSource implements IFrameSource {
    * load that failed settles to `null`, so the slot is given up on once.
    */
   private extras: Promise<HTMLVideoElement | null>[] = [];
-  private seekTolerance: number;
+  /** The source's frame rate, for the seek decision (`elementShowsFrameFor`). */
+  private frameRate: number | undefined;
   private sourceId: string;
   /** What a refusal calls the source: its `SourceVideo.name`, or its id when given none. */
   readonly sourceName: string;
@@ -252,7 +236,7 @@ export class HTMLVideoFrameSource implements IFrameSource {
     sourceName?: string
   ) {
     this.video = video;
-    this.seekTolerance = seekToleranceFor(frameRate);
+    this.frameRate = frameRate;
     this.sourceId = sourceId;
     this.sourceName = sourceName ?? sourceId;
     this.objectUrl = objectUrl;
@@ -309,21 +293,19 @@ export class HTMLVideoFrameSource implements IFrameSource {
     const video = slot === 0 ? this.video : await this.elementFor(slot);
     if (!video) return null;
 
-    // Check if we need to seek
-    const currentTime = video.currentTime;
-    const diff = timestamp - currentTime;
     let seekLanded = false;
     // An earlier seek that has landed since — however late — starts the count
     // again (ESCSUITE-305 re-review round 1).
     const wedgedAtStart = wedgeCountAtStart(this.wedgedSeeks.get(video) ?? 0, video);
 
-    // Only seek if necessary: a request within half a frame (at the source's own
-    // rate) of the current time is the frame already showing. A request that
+    // Only seek if necessary: a request on the frame the element already shows
+    // — the same frame at the source's own rate, and within half of one
+    // (`elementShowsFrameFor`, ESCSUITE-505) — needs none. A request that
     // needs no seek over an element still seeking from an earlier one gets the
     // same waits a seek does before it is counted, so a seek that is only slow
     // is not refused by the requests held at its time (an incoming transition
     // clip, or the outgoing one fetched twice a frame).
-    const needsSeek = Math.abs(diff) > this.seekTolerance;
+    const needsSeek = !elementShowsFrameFor(video.currentTime, timestamp, this.frameRate);
     if (needsSeek || video.seeking) {
       // The sought frame's callback, registered before the seek so it cannot
       // miss it: Chromium can fire 'seeked' while the element still paints the
