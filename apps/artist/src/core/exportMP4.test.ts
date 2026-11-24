@@ -719,6 +719,31 @@ describe('exportToMP4 rendering', () => {
     expect(media.seeks).toEqual([0, 1, 2, 3, 4, 5].map((i) => elementSeekTarget(2 + (i * 2) / 30)))
   })
 
+  // ESCSUITE-508: an import outside Chromium is stored at a placeholder 30 fps
+  // (`frameRateSource: 'assumed'`). Judged on that grid, a 0.25x clip of a
+  // 50 fps file skipped seeks to its next frame; with no rate to stand behind,
+  // the export seeks every request the element does not already sit at.
+  const slowed = [makeClip({ startTime: 2, duration: CLIP_DURATION, endTime: 2 + CLIP_DURATION * 0.25, speed: 0.25 })]
+
+  it.each([
+    ['assumed', 'assumed' as const],
+    ['absent', undefined],
+  ])('seeks a slowed clip on every frame when the source rate is %s (ESCSUITE-508)', async (_label, frameRateSource) => {
+    await run({ clips: slowed, sources: [makeSourceVideo({ width: 640, height: 360, frameRate: 30, frameRateSource })] })
+
+    expect(media.seeks).toEqual([0, 1, 2, 3, 4, 5].map((i) => elementSeekTarget(2 + i / 120)))
+  })
+
+  it.each(['measured', 'configured'] as const)(
+    'still skips the seeks a slowed clip of a %s rate needs none for (ESCSUITE-505)',
+    async (frameRateSource) => {
+      await run({ clips: slowed, sources: [makeSourceVideo({ width: 640, height: 360, frameRate: 30, frameRateSource })] })
+
+      // Only the requests on a new 30 fps frame (or over half a frame away) seek.
+      expect(media.seeks).toEqual([0, 3, 4].map((i) => elementSeekTarget(2 + i / 120)))
+    }
+  )
+
   it('draws an image source without a frame source', async () => {
     await storeSource('image1', 'image/png')
     const sources = [makeSourceVideo({ id: 'image1', mediaType: 'image' })]
