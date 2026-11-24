@@ -1,3 +1,5 @@
+import type { SourceVideo } from '../store/types';
+
 /**
  * Where to point a `<video>` element that is asked for the frame at `time`
  * (ESCSUITE-265, ESCSUITE-495).
@@ -59,9 +61,10 @@ export function elementSeekTarget(time: number): number {
  * 1/30 s apart: below 15 fps a half-frame window would be wider than that spacing
  * and serve the previous frame across a boundary. A rate that is missing or not
  * finite and positive counts as 30. An imported video's rate is measured
- * at import (ESCSUITE-276, `frameRateSource: 'measured'`); a rate the probe
- * could not measure, an ESCAPECRAFT take (`'configured'`) and every source
- * imported before then carry 30, so they get the 1/60 s window. The element
+ * at import (ESCSUITE-276, `frameRateSource: 'measured'`); an ESCAPECRAFT take
+ * (`'configured'`) carries 30, so it gets the 1/60 s window. A rate nobody
+ * measured (`'assumed'`, or absent) never reaches this function from an
+ * exporter: see {@link knownFrameRate} (ESCSUITE-505, ESCSUITE-508). The element
  * itself sits `ELEMENT_SEEK_BIAS` past the last request it was seeked for
  * (ESCSUITE-265), far inside this window.
  *
@@ -118,9 +121,11 @@ export function elementShowsFrameFor(
  * Whether a `<video>` sitting at `currentTime` is where a seek for `time` would
  * put it — at the request itself or at its seek target, or between the two —
  * so it shows that request's frame whatever the source's frame rate
- * (ESCSUITE-505). The element exporters' whole skip decision for a source
+ * (ESCSUITE-505). Both element paths' whole skip decision for a source
  * whose rate nobody measured (`frameRateSource` `'assumed'` or absent, every
- * import in Firefox, ESCSUITE-327): a placeholder rate's grid says nothing
+ * import outside Chromium, ESCSUITE-327): the element exporters' since
+ * ESCSUITE-505, `HTMLVideoFrameSource`'s (MP4) since ESCSUITE-508 (see
+ * {@link knownFrameRate}). A placeholder rate's grid says nothing
  * about where the file's frames start, so only a request the element already
  * answered — the same time asked again, or the first frame at 0 over the
  * rewound element — skips its seek. A microsecond either side absorbs an
@@ -128,4 +133,22 @@ export function elementShowsFrameFor(
  */
 export function elementSitsAt(currentTime: number, time: number): boolean {
   return currentTime >= time - 1e-6 && currentTime <= elementSeekTarget(time) + 1e-6;
+}
+
+/**
+ * `source`'s frame rate when something stands behind it — measured from its
+ * presented frames at import (`frameRateSource` `'measured'`, Chromium only,
+ * ESCSUITE-276/327) or the rate ESCAPECRAFT was configured to record at
+ * (`'configured'`) — and `undefined` for a placeholder: `'assumed'`, which
+ * every import in Firefox and Safari is, or absent, which reads the same. Both
+ * element paths hand the seek decision only this (ESCSUITE-505 for the WebM
+ * and GIF exporters, ESCSUITE-508 for the MP4 one), and judge a source without
+ * one by {@link elementSitsAt} alone.
+ */
+export function knownFrameRate(
+  source: Pick<SourceVideo, 'frameRate' | 'frameRateSource'> | undefined
+): number | undefined {
+  return source?.frameRateSource === 'measured' || source?.frameRateSource === 'configured'
+    ? source.frameRate
+    : undefined;
 }
