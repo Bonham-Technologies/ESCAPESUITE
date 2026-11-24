@@ -1136,6 +1136,24 @@ describe('ExportDialog', () => {
       expect(onClose).toHaveBeenCalledTimes(1)
     })
 
+    // ESCSUITE-502: the auto-close timer used to outlive the dialog. Fired
+    // after unmount, it called onClose for a dialog that was gone and, once
+    // the test environment was torn down, threw from setProgress.
+    it('does not auto-close after it has been unmounted', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      const { unmount } = render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+      await settle()
+      expect(screen.getByText('Export complete!')).toBeInTheDocument()
+
+      unmount()
+      expect(vi.getTimerCount()).toBe(0)
+      expect(() => vi.advanceTimersByTime(2000)).not.toThrow()
+
+      expect(onClose).not.toHaveBeenCalled()
+    })
+
     it('disables both export buttons for an empty timeline', () => {
       store().removeClipFromTimeline('clip1')
       render(<ExportDialog isOpen={true} onClose={onClose} />)
