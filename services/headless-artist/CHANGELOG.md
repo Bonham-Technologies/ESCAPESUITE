@@ -1,5 +1,18 @@
 # @escapesuite/headless-artist
 
+## 0.8.0
+
+### Minor Changes
+
+- 5a92fef: ESCAPEARTIST can speed a clip up or slow it down, from 0.25× to 4×, so the waiting parts of a screen recording play faster. Select a video or audio clip and open Speed in the inspector: choose 0.25×, 0.5×, 1×, 1.5×, 2× or 4×, or type any speed in between. The clip gets shorter or longer on the timeline, the clips after it on its row move up or along to match, and a recording's linked parts (its microphone, say) change speed with it so they stay in step. The sound plays faster or slower with the picture, so its pitch goes up or down, up to 2×; faster than 2× the clip is silent, and the inspector says which. To speed up just one part, split the clip around it first. Speed shows in the preview and in MP4, WebM and GIF exports, is kept when you save the project, and is rendered the same way by the headless render kit. Projects saved before open unchanged.
+
+### Patch Changes
+
+- 62d52eb: Exports of 30 fps WebM videos, such as ESCAPECRAFT recordings, no longer repeat the previous frame in place of some frames (every third one, in a video recorded at a steady 30 fps). WebM stores frame times rounded to the millisecond, and the export now looks far enough past each frame's start to find it. This applies to WebM, GIF and in-page MP4 exports, and to the headless render kit.
+- 3b7f081: Cancelling a WebM export that is saving to a slow file no longer leaves a "Cannot write to a closing writable stream" error behind in the browser console. And if an MP4 or WebM export ever produces a frame or a stretch of sound that the video file refuses to take, the export now stops and shows the reason, instead of finishing as if all was well with that part missing from the file. The same goes for the headless render kit.
+- 6e71875: Exports of slowed-down clips no longer repeat the previous frame in place of some frames. A clip slowed to 0.25× or about 0.4×, especially one from a 50, 60 or 120 fps video, could show a frame of the video twice and skip the next one. Every frame of the video now appears in its turn. This applies to WebM and GIF exports, to in-page MP4 exports of videos imported in Chrome or Edge, and to the headless render kit.
+- 131d892: MP4 exports of slowed-down clips no longer repeat the previous frame in place of some frames when the video was imported in Firefox or Safari. A clip slowed to 0.25× or about 0.4× of a 50, 60 or 120 fps video could show a frame twice and skip the next one in an MP4 export that decodes in the page (every MP4 export in Safari, and MP4 exports of WebM videos in Firefox). Every frame of the video now appears in its turn. The same applies to MP4 renders of the headless render kit, which never measures a video's frame rate. Such a clip can now take a little longer to export, about as long as a clip at normal speed.
+
 ## 0.7.6
 
 ### Patch Changes

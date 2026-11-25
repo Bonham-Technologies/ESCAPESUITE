@@ -1,5 +1,28 @@
 # @escapesuite/plan
 
+## 2.21.0
+
+### Minor Changes
+
+- 8046e2e: The hosted site now works offline after the first visit. Once you have opened the hub, ESCAPECRAFT or ESCAPEARTIST on escapesuite.tech while connected, that app opens and works with no connection, recording, editing and exporting included; open each app you want once while online. Chrome and Edge also offer to install each app. When a new version is published, the app saves it the next time you open it online and shows a short "Updated" note. Your recordings and projects are stored as before; this saves only the apps themselves.
+- 04231e7: The ESCAPE Suite home page and its legal pages have a new look, shared with the other Bonham Technologies products: warm paper and ink colours in light and dark, the Archivo typeface, square corners, and a teal accent. "Start recording" is now the one highlighted button; the other buttons are outlined. Nothing about what the pages say or where the buttons go has changed, and ESCAPECRAFT and ESCAPEARTIST look as they did.
+
+### Patch Changes
+
+- ba721cc: The Privacy Policy now matches the Known limitations page about the offline build: it makes no network requests of its own and fetches a video only when you give ESCAPEARTIST that video's address. It also no longer promises that analytics data is deleted after 90 days: that data is kept by Vercel for the reporting window of our plan. The policy's "Last updated" date is November 23, 2026.
+- a785204: The ESCAPE Suite site now tells search engines it works in Firefox 155+ and Safari 26.6+ as well as Chrome and Edge, on every page, matching the browsers the README lists as supported.
+- 650f950: ESCAPECRAFT now keeps each recording on your device while it records. If the tab closes or crashes, or the recording ends in an error before it is saved, ESCAPECRAFT offers it back the next time you open it: Recover saves what was recorded to your library, and Discard deletes it. A recovered recording can be missing its last few seconds. In a browser that cannot keep the recording on the device (including older versions of Safari for screen-with-webcam-overlay and sound-only recordings, which they record as MP4), ESCAPECRAFT records in memory as before and tells you the recording is not protected if the tab closes. The Known limitations page now explains what this needs and what it can lose.
+- 93aa54a: After your first saved recording, import or project save in a visit, ESCAPECRAFT and ESCAPEARTIST ask your browser to keep their stored recordings and media instead of clearing them automatically, and say what it answered: "Protected from automatic clean-up", or "Your browser may delete these if it runs low on space; download what you want to keep." ESCAPECRAFT shows this under your recordings, ESCAPEARTIST beside the storage figure in the media library. The Known limitations page now explains that Safari can delete stored recordings and projects after seven days of using Safari without interacting with the site.
+- 770759b: ESCAPEARTIST can translate your captions on this device. In Chrome on a computer, a Translate captions button beside Transcribe to captions turns the captions into a second caption track in the language you pick, with exactly the same timing, in one undo step. If the browser needs to download a translation model first, it asks before anything is downloaded. Both languages can be shown, hidden and burned in on their own; when both show they are stacked, the original above the translation. The export dialog offers a caption file for each language, named with it (for example Talk.en.vtt and Talk.es.vtt). Transcribed captions now remember their language. The Known limitations page explains where translation is offered, what the browser downloads, and that it works offline only when the model is already installed.
+- 8ef5ae0: Your screen now stays on while ESCAPECRAFT records and while ESCAPEARTIST exports or transcribes, so a long job is not cut short by the display going to sleep. The export window says "Keeping the screen on until the export finishes." while it holds the lock. Browsers release the lock when the tab is hidden, and the apps take it again when you come back to the tab. Browsers without this feature work as before. The Known limitations page now explains that recording another window with ESCAPECRAFT hidden lets the screen sleep as your system settings say.
+- 3d177d9: The hosted site's "Page not found" page now has its own title and description instead of the home page's, so a link to an address that does not exist no longer previews as the ESCAPE Suite home page. It also asks search engines not to index the address and no longer names the home page as its own address.
+- ceb303d: The hub's sitemap gives every page the date it last changed on the live site too, so search engines can tell when the home, privacy, terms and limitations pages were updated. Before, the live sitemap listed them with no dates.
+- 61221ec: ESCAPE Suite's address is now escapesuite.tech. Links to escapesuite.io and www.escapesuite.io still work and forward to the same page, and the Privacy, Terms and Limitations pages now name escapesuite.tech.
+- Updated dependencies [93aa54a]
+- Updated dependencies [8ef5ae0]
+- Updated dependencies [b7fb2e2]
+  - @escapesuite/shared@1.5.0
+
 ## 2.20.0
 
 ### Patch Changes
