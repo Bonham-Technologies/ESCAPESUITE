@@ -1,5 +1,16 @@
 # @escapesuite/shared
 
+## 1.5.0
+
+### Minor Changes
+
+- 8ef5ae0: Your screen now stays on while ESCAPECRAFT records and while ESCAPEARTIST exports or transcribes, so a long job is not cut short by the display going to sleep. The export window says "Keeping the screen on until the export finishes." while it holds the lock. Browsers release the lock when the tab is hidden, and the apps take it again when you come back to the tab. Browsers without this feature work as before. The Known limitations page now explains that recording another window with ESCAPECRAFT hidden lets the screen sleep as your system settings say.
+
+### Patch Changes
+
+- 93aa54a: After your first saved recording, import or project save in a visit, ESCAPECRAFT and ESCAPEARTIST ask your browser to keep their stored recordings and media instead of clearing them automatically, and say what it answered: "Protected from automatic clean-up", or "Your browser may delete these if it runs low on space; download what you want to keep." ESCAPECRAFT shows this under your recordings, ESCAPEARTIST beside the storage figure in the media library. The Known limitations page now explains that Safari can delete stored recordings and projects after seven days of using Safari without interacting with the site.
+- b7fb2e2: Recordings made in Firefox now play back in their true colours. Firefox stored their colours one way but labelled them another, so every player showed them slightly off (reds and greens up to about a tenth too bright or too dark). ESCAPECRAFT now labels them correctly, the way ESCAPEARTIST already does for its Firefox exports.
+
 ## 1.4.10
 
 ### Patch Changes
