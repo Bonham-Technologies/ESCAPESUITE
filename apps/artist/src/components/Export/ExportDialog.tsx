@@ -41,6 +41,7 @@ import {
 import { LOUDNESS_TARGETS, formatLoudnessSummary, loudnessTargetOrOff } from '../../core/loudness';
 import type { LoudnessTarget } from '../../core/loudness';
 import { shouldAnnounceProgress } from './progressAnnouncement';
+import { sectionOnTimeline, sectionPastEndReason } from './sectionRange';
 import { registerLiveExport, clearLiveExport } from './liveExport';
 import type { ProgressAnnouncement } from './progressAnnouncement';
 import { getSetting, setSetting } from '../../core/storage';
@@ -51,6 +52,7 @@ import { FileWriteError, chooseSaveDestination, errorMessage, mayPickSaveFile, o
 import type { FileSink, SaveDestination, SaveFileType } from '../../core/saveFile';
 import { serializeCaptions } from '../../core/captions';
 import { buildYoutubeChapters } from '../../utils/youtubeChapters';
+import type { YoutubeChapters } from '../../utils/youtubeChapters';
 import type { CaptionCue, CaptionFormat } from '../../core/captions';
 import { languageName } from '../../core/transcriptionLanguage';
 import type { ExportOptions, ExportProgress } from '../../store/types';
@@ -128,6 +130,9 @@ const LENGTH_REASON_ID = 'export-length-reason';
 const FULL_LENGTH_REASON_ID = 'export-full-length-reason';
 const CHAPTERS_EMPTY_ID = 'export-chapters-empty';
 
+/** A section wholly past the timeline's end has no chapters (ESCSUITE-519). */
+const NO_CHAPTERS: YoutubeChapters = { chapters: [], text: '', warnings: [] };
+
 /**
  * How to set a section, from the keys `useAppKeyboardShortcuts` binds: I and O
  * set the in and out points at the playhead (ESCSUITE-385).
@@ -182,7 +187,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // Use prop timeRange if provided, otherwise derive from in/out points.
   // Memoised so handleExport, which lists it as a dependency, is not rebuilt
   // on every render.
-  const timeRange = useMemo(
+  const selectedRange = useMemo(
     () =>
       timeRangeProp ??
       (inPoint !== null && outPoint !== null
@@ -190,6 +195,21 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         : undefined),
     [timeRangeProp, inPoint, outPoint]
   );
+  // ESCSUITE-519: the section as it lies on the timeline. An edit that
+  // shortens the timeline (a clip sped up, one removed) leaves the in and out
+  // points where they were, and the exporters fill whatever lies past the end
+  // with black and silence. A section that straddles the end is clamped to
+  // it; one wholly past the end has nothing to export (`timeRange` is then
+  // undefined while `selectedRange` is set) and the dialog says why.
+  const timelineSeconds = calculateTimelineDuration(clips);
+  const timeRange = useMemo(
+    () => (selectedRange ? sectionOnTimeline(selectedRange, timelineSeconds) ?? undefined : undefined),
+    [selectedRange, timelineSeconds]
+  );
+  const sectionPastEnd = selectedRange !== undefined && timeRange === undefined;
+  // What the section button and the chapters' Section choice say: the clamped
+  // range, or the selected one when none of it is on the timeline.
+  const shownRange = timeRange ?? selectedRange;
 
   const [advancedOptions, setAdvancedOptions] = useState<ExportOptions>({
     format: 'webm',
@@ -377,7 +397,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // ESCSUITE-257: a timeline (or a selected section) with no length cannot be
   // exported, so every download says so instead of reaching the exporter's
   // refusal. `clips.length === 0` keeps its own, older handling.
-  const wholeLengthReason = exportLengthReason(calculateTimelineDuration(clips));
+  const wholeLengthReason = exportLengthReason(timelineSeconds);
 
   // ESCSUITE-293: the Captions track as cues, for the sidecar row — its text
   // clips as they stand now (edits, moves and all), in timeline order. Read
@@ -434,13 +454,15 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // `handleExport`). Without a section, the whole timeline. Shown when a
   // marker falls in either range.
   const [chaptersForFullVideo, setChaptersForFullVideo] = useState(false);
+  // Both lists stop at the timeline's end, as the export does (ESCSUITE-519):
+  // a section wholly past it has no chapters.
   const fullChapters = useMemo(
-    () => buildYoutubeChapters(markers, { start: 0, end: calculateTimelineDuration(clips) }),
-    [markers, clips]
+    () => buildYoutubeChapters(markers, { start: 0, end: timelineSeconds }),
+    [markers, timelineSeconds]
   );
   const sectionChapters = useMemo(
-    () => (timeRange ? buildYoutubeChapters(markers, timeRange) : null),
-    [markers, timeRange]
+    () => (!selectedRange ? null : timeRange ? buildYoutubeChapters(markers, timeRange) : NO_CHAPTERS),
+    [markers, selectedRange, timeRange]
   );
   const chapters = sectionChapters && !chaptersForFullVideo ? sectionChapters : fullChapters;
   const showChaptersRow = fullChapters.chapters.length > 0 || (sectionChapters?.chapters.length ?? 0) > 0;
@@ -461,15 +483,19 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // What the whole timeline exports as, and what the click exports: the
   // section when one is selected. Only the stretch encoded is held to the
   // three-hour limit (ESCSUITE-367), so a section of a longer timeline exports.
-  const fullLengthReason = wholeLengthReason ?? exportedLengthReason(calculateTimelineDuration(clips));
-  const lengthReason = timeRange
-    ? wholeLengthReason ?? exportedLengthReason(timeRange.end - timeRange.start)
-    : fullLengthReason;
+  // A section wholly past the timeline's end has its own reason (ESCSUITE-519).
+  const fullLengthReason = wholeLengthReason ?? exportedLengthReason(timelineSeconds);
+  const lengthReason = !selectedRange
+    ? fullLengthReason
+    : wholeLengthReason ??
+      (timeRange
+        ? exportedLengthReason(timeRange.end - timeRange.start)
+        : sectionPastEndReason(selectedRange, timelineSeconds));
   // ESCSUITE-385: a length reason is said in the dialog, not only in a
   // button's `title` (a hover tooltip keyboard and touch users never see), and
   // each button it disables points at it with `aria-describedby`. The
   // full-video button gets a line of its own only when its reason differs.
-  const fullLengthNotice = timeRange && fullLengthReason !== lengthReason ? fullLengthReason : null;
+  const fullLengthNotice = selectedRange && fullLengthReason !== lengthReason ? fullLengthReason : null;
 
   // The Advanced "Download {format}" button must gate on the format the
   // click will actually run, not the one selected in the radio (review
@@ -501,7 +527,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   );
   // The length that will be encoded: the in/out section when there is one, the
   // whole timeline otherwise. The warning is about the output, not the project.
-  const gifSeconds = timeRange ? timeRange.end - timeRange.start : timelineDuration;
+  const gifSeconds = timeRange ? timeRange.end - timeRange.start : selectedRange ? 0 : timelineDuration;
   // Frames, never seconds, derived from the rate — the same expression
   // `exportToGIF` itself uses, so the estimate counts what will be encoded.
   const gifFrames = Math.ceil(gifSeconds * gifFps);
@@ -541,6 +567,11 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       setError('No clips to export');
       return;
     }
+
+    // A section wholly past the timeline's end has nothing to export, and its
+    // buttons are disabled; never let a click fall through to the whole
+    // timeline either (ESCSUITE-519).
+    if (!exportFullVideo && sectionPastEnd) return;
 
     // Determine options: primary button uses defaults, advanced button uses configured options
     const effectiveTimeRange = exportFullVideo ? undefined : timeRange;
@@ -819,7 +850,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       // inside, for the same reason as the line above.
       clearLiveExport(abortController);
     }
-  }, [clips, tracks, sourceVideos, advancedOptions, projectName, projectResolution, mp4Supported, projectHasAudio, onClose, timeRange, clearAutoClose]);
+  }, [clips, tracks, sourceVideos, advancedOptions, projectName, projectResolution, mp4Supported, projectHasAudio, onClose, timeRange, sectionPastEnd, clearAutoClose]);
 
   const handleCancel = useCallback(() => {
     // Abort any in-progress export
@@ -1008,7 +1039,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
               )}
 
               <div className={styles.primarySection}>
-                {timeRange ? (
+                {shownRange ? (
                   <>
                     <button
                       className={styles.primaryExportButton}
@@ -1017,7 +1048,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                       title={lengthReason ?? webmBlockedReason ?? undefined}
                       aria-describedby={lengthReason !== null ? LENGTH_REASON_ID : undefined}
                     >
-                      Export Section ({formatTime(timeRange.start)} - {formatTime(timeRange.end)})
+                      Export Section ({formatTime(shownRange.start)} - {formatTime(shownRange.end)})
                     </button>
                     <button
                       className={styles.primaryExportButton}
@@ -1399,7 +1430,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
               {showChaptersRow && (
                 <div className={styles.section} role="group" aria-labelledby="export-chapters-label">
                   <span className={styles.label} id="export-chapters-label">Chapters</span>
-                  {timeRange && (
+                  {shownRange && (
                     <div className={styles.radioGroup} role="radiogroup" aria-label="Chapter times for">
                       <label className={styles.radio}>
                         <input
@@ -1408,7 +1439,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                           checked={!chaptersForFullVideo}
                           onChange={() => setChaptersForFullVideo(false)}
                         />
-                        <span>Section ({formatTime(timeRange.start)} - {formatTime(timeRange.end)})</span>
+                        <span>Section ({formatTime(shownRange.start)} - {formatTime(shownRange.end)})</span>
                       </label>
                       <label className={styles.radio}>
                         <input
