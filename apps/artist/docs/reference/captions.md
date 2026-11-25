@@ -180,7 +180,10 @@ into a YouTube chapter list: **Copy chapters** (clipboard) and **Download chapte
   "Export Section" and "Export Full Video", so the row shows a **Section / Full video** radio pair:
   Section by default, switched to whichever the last export from the dialog wrote
   (`handleExport` sets it; the Advanced download exports the section). Markers outside
-  `[start, end)` are dropped, the rest offset. An `Intro` line at 0:00 is added when the first
+  `[start, end)` are dropped, the rest offset. Both ranges stop at the timeline's end (ESCSUITE-519):
+  the full video is `[0, timeline length)` and the section is the one the dialog exports, clamped to
+  the end, so a marker left past the end by an edit that shortened the timeline is never listed, and a
+  section wholly past the end has no chapters. An `Intro` line at 0:00 is added when the first
   marker is later (whole seconds, so a marker within the first second counts as 0:00 and needs no
   Intro). The row shows when a marker falls in either range; when the picked one has none, both
   buttons are disabled and point (`aria-describedby`) at a "No markers in the section." line.
