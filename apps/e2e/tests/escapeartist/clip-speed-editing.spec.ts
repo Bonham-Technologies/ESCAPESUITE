@@ -2,7 +2,15 @@ import { test, expect, type Locator, type Page } from '@playwright/test'
 import { ARTIST_URL, importMediaAndAddToTimeline, inspector } from '../../utils/artist'
 import { AV_FIXTURE_TIMING, AV_FIXTURE_WEBM } from '../../utils/mediaHealth'
 import { waitForAppReady } from '../../utils/ready'
-import { clipFromLeft, pixelsPerSecond, playheadSeconds, reopenProject, saveProject, timelineClips } from '../../utils/timeline'
+import {
+  clipFromLeft,
+  pixelsPerSecond,
+  playheadSeconds,
+  reopenProject,
+  saveProject,
+  timelineClips,
+  type ClipSpan as Span,
+} from '../../utils/timeline'
 
 /**
  * Clip speed meeting the timeline's edits (ESCSUITE-522).
@@ -26,12 +34,6 @@ import { clipFromLeft, pixelsPerSecond, playheadSeconds, reopenProject, saveProj
 
 /** How far a length or an edge read off the screen may be off: a pixel and a half at zoom 1 (50 px a second). */
 const TOLERANCE = 0.03
-
-/** A clip's start and end on the timeline, in seconds. */
-interface Span {
-  start: number
-  end: number
-}
 
 /** Each of `clips`' spans, left to right, measured from the left edge of the clips' row, where 0 s is. */
 async function spansOf(clips: Locator, pxPerSec: number): Promise<Span[]> {
@@ -101,11 +103,17 @@ async function setSpeedFromInspector(page: Page, clip: Locator, label: string): 
   await pickSpeed(page, label)
 }
 
-/** Put the playhead at `seconds` (whole seconds) with Home, then ArrowRight a second at a time. */
+/**
+ * Put the playhead at `seconds` (whole seconds) with Home, then ArrowRight a
+ * second at a time. Each press steps from the time the transport last
+ * rendered, so every step is waited for before the next press: on a slow
+ * runner a press sent early would step from a stale time and be lost.
+ */
 async function playheadTo(page: Page, seconds: number): Promise<void> {
-  await page.keyboard.press('Home')
-  for (let i = 0; i < seconds; i++) await page.keyboard.press('ArrowRight')
-  await expect.poll(() => playheadSeconds(page), { message: `the playhead is at ${seconds} s` }).toBeCloseTo(seconds, 3)
+  for (let at = 0; at <= seconds; at++) {
+    await page.keyboard.press(at === 0 ? 'Home' : 'ArrowRight')
+    await expect.poll(() => playheadSeconds(page), { message: `the playhead is at ${at} s` }).toBeCloseTo(at, 3)
+  }
 }
 
 /**
