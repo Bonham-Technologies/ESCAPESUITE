@@ -27,6 +27,7 @@ export const NODE_TEST_SUITES: string[] = [
   'src/components/ClipEditor/clipEditorOptions.test.ts',
   'src/components/Export/liveExport.test.ts',
   'src/components/Export/progressAnnouncement.test.ts',
+  'src/components/Export/sectionRange.test.ts',
   'src/components/Preview/transitions.test.ts',
   'src/components/Timeline/timelineGeometry.test.ts',
   'src/core/__tests__/canvasRenderer.test.ts',
