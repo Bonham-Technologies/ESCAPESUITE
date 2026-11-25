@@ -28,6 +28,8 @@ export interface VideoBlock {
   firstInCluster: boolean
   /** The frame itself: the block's payload, a view into the file's bytes. */
   data: Uint8Array
+  /** Whether it carries BlockAdditions, which is how WebM stores a VP9 or VP8 alpha layer (ESCSUITE-507). */
+  alpha: boolean
 }
 
 export interface WebmLayout {
@@ -131,12 +133,14 @@ export function readWebmLayout(bytes: Uint8Array): WebmLayout {
         // A SimpleBlock, or a BlockGroup's Block (0xa1) with its ReferenceBlocks (0xfb).
         let block: ReturnType<typeof element> | undefined
         let key = false
+        let alpha = false
         if (child.id === 0xa3) {
           block = child
         } else if (child.id === 0xa0) {
           const fields = children(child)
           block = fields.find((f) => f.id === 0xa1)
           key = !fields.some((f) => f.id === 0xfb)
+          alpha = fields.some((f) => f.id === 0x75a1)
         }
         if (block) {
           const length = vintLength(bytes[block.dataStart])
@@ -152,6 +156,7 @@ export function readWebmLayout(bytes: Uint8Array): WebmLayout {
               firstInCluster: !sawVideo,
               // After the timecode and the flags byte; Mediabunny never laces.
               data: bytes.subarray(head + 3, block.end),
+              alpha,
             })
             sawVideo = true
           }

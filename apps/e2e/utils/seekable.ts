@@ -19,9 +19,10 @@ import { expect, type ConsoleMessage, type Page } from '@playwright/test'
  * a Cues element indexing every video keyframe. Chromium's `<video>` scans a
  * WebM with an empty Cues element and seeks it anyway, but Firefox's seek into a
  * cluster that does not open on a keyframe never settles (ESCSUITE-305), and
- * `webm-duration-fix` alone left a PiP take's Cues empty because Chrome writes
+ * `webm-duration-fix` alone left a PiP take's Cues empty because Chrome wrote
  * the compositor's alpha-VP9 frames as BlockGroups, which it does not index
- * (ESCSUITE-322). These specs are Chromium-only, so the Cues are read, not
+ * (ESCSUITE-322; since ESCSUITE-507 the canvas is opaque and the frames are
+ * SimpleBlocks). These specs are Chromium-only, so the Cues are read, not
  * exercised.
  *
  * Shared by the dev-server spec (`tests/escapecraft/pip-seekable.spec.ts`) and
@@ -344,9 +345,10 @@ export async function expectSeekableTake(page: Page, log: ConsoleCapture): Promi
   ).toBe(true)
   expect(Number(stored.reported)).toBeGreaterThan(0)
 
-  // The seek index Firefox needs (ESCSUITE-322). A PiP take's video frames are
+  // The seek index Firefox needs (ESCSUITE-322). A PiP take's video frames were
   // BlockGroups, which `webm-duration-fix` alone never indexed: it left the
-  // Cues element present but empty.
+  // Cues element present but empty. Since ESCSUITE-507 they are SimpleBlocks,
+  // which it indexes per cluster, not per keyframe; the check below holds both.
   const cues = await storedRecordingCues(page)
   expect(cues.present, 'stored recording has no Cues element').toBe(true)
   expect(cues.payloadBytes, 'stored recording has an empty Cues element').toBeGreaterThan(0)

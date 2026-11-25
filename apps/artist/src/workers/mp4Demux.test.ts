@@ -151,8 +151,11 @@ describe('demuxVideoTrack', () => {
       await expect(demuxVideoTrack(fixture('hevc.mp4'))).rejects.toThrow(
         /^Only H\.264 is decoded in the worker; hvc1\.[^ ]+ needs the <video> path$/
       )
+      // mp4box 2.6 (#575) writes all five optional vp09 fields once any differs
+      // from its default; the fixture's colour primaries, transfer and matrix
+      // are 02 (unspecified).
       await expect(demuxVideoTrack(fixture('vp9.mp4'))).rejects.toThrow(
-        'Only H.264 is decoded in the worker; vp09.00.10.08 needs the <video> path'
+        'Only H.264 is decoded in the worker; vp09.00.10.08.01.02.02.02.00 needs the <video> path'
       )
     })
 

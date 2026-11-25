@@ -4,7 +4,7 @@ import { exportButtonName } from './artist'
 
 /**
  * Helpers for the frame-barcode export specs (ESCSUITE-454, ESCSUITE-495,
- * ESCSUITE-505).
+ * ESCSUITE-505, ESCSUITE-508).
  *
  * Their sources, under `fixtures/presented-frame/`, show each frame's own
  * index as an 8-bit barcode: eight full-height stripes, stripe k from the left
@@ -93,17 +93,29 @@ export async function cutIntoPieces(
  * Export the timeline as a WebM at project resolution, from the export
  * dialog's Advanced panel, and return its bytes.
  */
-export async function exportWebmAtProjectResolution(page: Page): Promise<Buffer> {
-  await page.getByRole('radio', { name: /WebM/ }).check()
+export function exportWebmAtProjectResolution(page: Page): Promise<Buffer> {
+  return exportAtProjectResolution(page, 'webm')
+}
+
+/**
+ * Export the timeline as an MP4 at project resolution, from the export
+ * dialog's Advanced panel, and return its bytes (ESCSUITE-508).
+ */
+export function exportMp4AtProjectResolution(page: Page): Promise<Buffer> {
+  return exportAtProjectResolution(page, 'mp4')
+}
+
+async function exportAtProjectResolution(page: Page, format: 'webm' | 'mp4'): Promise<Buffer> {
+  await page.getByRole('radio', { name: format === 'mp4' ? /MP4/ : /WebM/ }).check()
   await page.locator('select').filter({ has: page.locator('option[value="480p"]') }).selectOption('project')
   const download = page.waitForEvent('download', { timeout: 120_000 })
   // The Advanced panel's button sits after the primary "Download WebM" in the DOM.
-  await page.getByRole('button', { name: exportButtonName('webm') }).last().click()
+  await page.getByRole('button', { name: exportButtonName(format) }).last().click()
   return readFileSync(await (await download).path())
 }
 
 /**
- * Decode `bytes` (a WebM) in a `<video>` outside the document, as the exporter
+ * Decode `bytes` (a WebM, or the `mimeType` given) in a `<video>` outside the document, as the exporter
  * holds its sources, and read the barcode of the frame at each of `times`
  * (seconds). Each read waits for the seek's frame callback as well as
  * 'seeked', or the reader itself could read the frame from before the seek
@@ -111,13 +123,18 @@ export async function exportWebmAtProjectResolution(page: Page): Promise<Buffer>
  * miss the frame, and the deadline only keeps a read from hanging. Read
  * mid-frame: a time on a frame's start can land on the frame before it.
  */
-export async function readBarcodes(page: Page, bytes: Buffer, times: number[]): Promise<number[]> {
+export async function readBarcodes(
+  page: Page,
+  bytes: Buffer,
+  times: number[],
+  mimeType = 'video/webm'
+): Promise<number[]> {
   return page.evaluate(
-    async ({ base64, times, bits }) => {
+    async ({ base64, times, bits, mimeType }) => {
       const binary = atob(base64)
       const array = new Uint8Array(binary.length)
       for (let i = 0; i < binary.length; i++) array[i] = binary.charCodeAt(i)
-      const url = URL.createObjectURL(new Blob([array], { type: 'video/webm' }))
+      const url = URL.createObjectURL(new Blob([array], { type: mimeType }))
       const video = document.createElement('video')
       video.muted = true
       // Without 'auto', a detached element in headless Chromium can keep
@@ -126,7 +143,7 @@ export async function readBarcodes(page: Page, bytes: Buffer, times: number[]): 
       video.src = url
       await new Promise<void>((resolve, reject) => {
         video.onloadeddata = () => resolve()
-        video.onerror = () => reject(new Error('the WebM did not load'))
+        video.onerror = () => reject(new Error(`the ${mimeType} file did not load`))
       })
       const canvas = document.createElement('canvas')
       canvas.width = video.videoWidth
@@ -161,7 +178,7 @@ export async function readBarcodes(page: Page, bytes: Buffer, times: number[]): 
       URL.revokeObjectURL(url)
       return values
     },
-    { base64: bytes.toString('base64'), times, bits: BARCODE_BITS }
+    { base64: bytes.toString('base64'), times, bits: BARCODE_BITS, mimeType }
   )
 }
 

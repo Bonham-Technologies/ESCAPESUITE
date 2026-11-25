@@ -349,13 +349,14 @@ describe('frameSource', () => {
       await expect(source.getFrame(1)).rejects.toThrow('Source has been disposed');
     });
 
-    it('does not seek when the request is within one frame of the current time', async () => {
+    it('does not seek when the request is on the frame a known-rate source already shows', async () => {
       const element = new ScriptedVideoElement({ stallSeek: true });
       element.currentTime = 5;
-      const source = HTMLVideoFrameSource.fromElement('near', element as unknown as HTMLVideoElement);
+      // A known 30 fps rate: a source with none skips only a request it sits at (ESCSUITE-508).
+      const source = HTMLVideoFrameSource.fromElement('near', element as unknown as HTMLVideoElement, 30);
 
-      // 0.01s away, under the half-frame (1/60s) fallback tolerance: no seek, so the stalled
-      // seek never matters and the call resolves immediately.
+      // 0.01s away, under the half-frame (1/60s) tolerance and on the same frame: no seek, so the
+      // stalled seek never matters and the call resolves immediately.
       await expect(source.getFrame(5.01)).resolves.toBe(element);
       expect(element.currentTime).toBe(5);
     });

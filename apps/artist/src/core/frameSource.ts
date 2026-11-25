@@ -12,7 +12,7 @@
 
 import { VideoDecodeManager } from './videoDecodeManager';
 import { isMeasuredWorkerDecodeEngine } from './workerDecodeEngine';
-import { elementSeekTarget, elementShowsFrameFor } from './elementSeek';
+import { elementSeekTarget, elementShowsFrameFor, elementSitsAt } from './elementSeek';
 import { countWedgedSeek, settleSeekInFlight, wedgeCountAtStart } from './seekWedge';
 import { watchPresentedFrame, type PresentedFrameWatch } from './presentedFrame';
 import { ExportAbortedError, loadVideoElementFromUrl } from './exportTypes';
@@ -215,7 +215,12 @@ export class HTMLVideoFrameSource implements IFrameSource {
    * load that failed settles to `null`, so the slot is given up on once.
    */
   private extras: Promise<HTMLVideoElement | null>[] = [];
-  /** The source's frame rate, for the seek decision (`elementShowsFrameFor`). */
+  /**
+   * The source's frame rate, for the seek decision (`elementShowsFrameFor`):
+   * only a finite, positive one. Without it — a rate nobody measured, which the
+   * MP4 exporter does not hand on (`knownFrameRate`, ESCSUITE-508) — a seek is
+   * skipped only when the element already sits at the request (`elementSitsAt`).
+   */
   private frameRate: number | undefined;
   private sourceId: string;
   /** What a refusal calls the source: its `SourceVideo.name`, or its id when given none. */
@@ -236,7 +241,8 @@ export class HTMLVideoFrameSource implements IFrameSource {
     sourceName?: string
   ) {
     this.video = video;
-    this.frameRate = frameRate;
+    this.frameRate =
+      frameRate !== undefined && Number.isFinite(frameRate) && frameRate > 0 ? frameRate : undefined;
     this.sourceId = sourceId;
     this.sourceName = sourceName ?? sourceId;
     this.objectUrl = objectUrl;
@@ -300,12 +306,17 @@ export class HTMLVideoFrameSource implements IFrameSource {
 
     // Only seek if necessary: a request on the frame the element already shows
     // — the same frame at the source's own rate, and within half of one
-    // (`elementShowsFrameFor`, ESCSUITE-505) — needs none. A request that
+    // (`elementShowsFrameFor`, ESCSUITE-505) — needs none. A source with no
+    // rate to judge by (ESCSUITE-508) has no grid: only a request the element
+    // already sits at (the same time again, or 0 over a fresh element) does. A request that
     // needs no seek over an element still seeking from an earlier one gets the
     // same waits a seek does before it is counted, so a seek that is only slow
     // is not refused by the requests held at its time (an incoming transition
     // clip, or the outgoing one fetched twice a frame).
-    const needsSeek = !elementShowsFrameFor(video.currentTime, timestamp, this.frameRate);
+    const needsSeek =
+      this.frameRate === undefined
+        ? !elementSitsAt(video.currentTime, timestamp)
+        : !elementShowsFrameFor(video.currentTime, timestamp, this.frameRate);
     if (needsSeek || video.seeking) {
       // The sought frame's callback, registered before the seek so it cannot
       // miss it: Chromium can fire 'seeked' while the element still paints the
@@ -566,7 +577,8 @@ export class FrameSourceFactory {
    * @param onFallback Told when a source decodes on the HTMLVideoElement path while
    *   the worker is running — an MP4 refused now or given up on mid-export, or
    *   a source that is not an MP4 at all (ESCSUITE-261)
-   * @param frameRate The source's own frame rate, for the `<video>` path's seek tolerance
+   * @param frameRate The source's own frame rate, for the `<video>` path's seek decision: only a
+   *   rate something stands behind (`knownFrameRate`); leave it out for a placeholder (ESCSUITE-508)
    * @param sourceName The source's name, for the refusal a `<video>` whose seeks never
    *   complete fails the export with (ESCSUITE-305); its id when omitted
    * @returns A frame source (WebCodecs or HTMLVideoElement based)
