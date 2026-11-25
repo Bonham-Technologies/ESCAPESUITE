@@ -21,6 +21,7 @@
 // See `docs/reference/clip-speed.md`.
 
 import type { Clip, SourceVideo } from './types';
+import { linkedPartners } from './linkedClips';
 
 /** The slowest a clip can play. */
 export const MIN_CLIP_SPEED = 0.25;
@@ -84,4 +85,19 @@ export function canHaveSpeed(
 ): boolean {
   if (clip.overlayType || !clip.sourceVideoId) return false;
   return sourceVideos.find((s) => s.id === clip.sourceVideoId)?.mediaType !== 'image';
+}
+
+/**
+ * The clips a speed change of `clip` sets together: `clip` and every media
+ * clip linked to it, so a take's screen and microphone stay in step.
+ * `setClipSpeed` changes these, and the left-behind count
+ * (`speedChangeLeftBehind`, ESCSUITE-521) reads where they start, so the two
+ * cannot disagree.
+ */
+export function speedGroup(
+  clips: readonly Clip[],
+  clip: Clip,
+  sourceVideos: readonly Pick<SourceVideo, 'id' | 'mediaType'>[]
+): Clip[] {
+  return [clip, ...linkedPartners(clips, clip).filter((p) => canHaveSpeed(p, sourceVideos))];
 }

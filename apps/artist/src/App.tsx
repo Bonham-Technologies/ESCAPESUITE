@@ -309,6 +309,7 @@ function App() {
         <InspectorSidebar
           collapsed={inspectorCollapsed}
           onToggle={toggleInspector}
+          showNotification={showNotification}
         />
 
         {/* Mobile inspector toggle button */}

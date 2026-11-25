@@ -331,7 +331,9 @@ tracks will not move: 1 blur, 1 media clip. 1 marker will not move. They may
 fall out of step with the take." The sentence is the dialog's accessible
 description (`aria-describedby`), and the notice after **Remove all** repeats
 the count ("… did not move"). Nothing is shown, and the dialog has no
-description, when nothing is left behind.
+description, when nothing is left behind. The sentence is `leftBehindText`
+(`components/leftBehindText.ts`), which a clip's speed change also uses for
+its own notice (ESCSUITE-521, [`clip-speed.md`](clip-speed.md)).
 
 ## Tests
 
