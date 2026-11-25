@@ -28,8 +28,11 @@ export function sectionOnTimeline(range: SectionRange, timelineSeconds: number):
  * as it does to every length reason.
  */
 export function sectionPastEndReason(range: SectionRange, timelineSeconds: number): string {
-  return (
-    `Cannot export the section: it starts at ${formatTime(range.start)} and the timeline ends at ` +
-    `${formatTime(timelineSeconds)}. Set the in point before the end, or export the full video`
-  )
+  const start = formatTime(range.start)
+  const end = formatTime(timelineSeconds)
+  // Whole seconds: a start at, or just past, the end shows the same time as
+  // the end, and "starts at 0:01 and the timeline ends at 0:01" reads as a
+  // contradiction.
+  const where = start === end ? `it starts at ${start}, where the timeline ends` : `it starts at ${start} and the timeline ends at ${end}`
+  return `Cannot export the section: ${where}. Set the in point before the end, or export the full video`
 }

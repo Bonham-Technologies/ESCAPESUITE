@@ -41,4 +41,10 @@ describe('sectionPastEndReason (ESCSUITE-519)', () => {
       'Cannot export the section: it starts at 0:02 and the timeline ends at 0:01. Set the in point before the end, or export the full video'
     )
   })
+
+  it('does not contradict itself when the start and the end show as the same second', () => {
+    const reason = 'Cannot export the section: it starts at 0:01, where the timeline ends. Set the in point before the end, or export the full video'
+    expect(sectionPastEndReason({ start: 1.25, end: 4.5 }, 1.25)).toBe(reason)
+    expect(sectionPastEndReason({ start: 1.5, end: 4.5 }, 1.25)).toBe(reason)
+  })
 })
