@@ -4,12 +4,24 @@ import react from '@vitejs/plugin-react'
 import { viteSingleFile } from 'vite-plugin-singlefile'
 import { visualizer } from 'rollup-plugin-visualizer'
 import { readFileSync } from 'node:fs'
+import { OFFLINE_CSP_EXTRA, offlineCspPlugin } from '../../scripts/offline-csp.mjs'
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
     react(),
     viteSingleFile(),
+    // The offline download only (ESCSUITE-467): a Content-Security-Policy
+    // <meta> that admits no network source. The AudioWorklet module is loaded
+    // from a blob: URL, or a data: URL where the browser refuses blob:null from
+    // a file:// page (ESCSUITE-317), so script-src admits both local schemes.
+    // Policy and rationale: scripts/offline-csp.mjs; what it does not cover:
+    // docs/VERIFY.md.
+    process.env.VITE_BUILD_MODE === 'standalone' &&
+      offlineCspPlugin({
+        htmlPath: 'dist/index.html',
+        extra: OFFLINE_CSP_EXTRA.craft,
+      }),
     // Run with ANALYZE=true to generate bundle-stats.html
     process.env.ANALYZE === 'true' && visualizer({
       filename: 'bundle-stats.html',

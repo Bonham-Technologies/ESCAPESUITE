@@ -6,6 +6,7 @@ import { visualizer } from 'rollup-plugin-visualizer'
 import { readFileSync, writeFileSync, unlinkSync, existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { isSingleFileBuild } from './singleFileBuild.js'
+import { OFFLINE_CSP_EXTRA, offlineCspPlugin } from '../../scripts/offline-csp.mjs'
 import { NODE_TEST_SUITES } from './nodeTestSuites.ts'
 
 const TEST_FILES = 'src/**/*.{test,spec}.{js,ts,jsx,tsx}'
@@ -199,6 +200,16 @@ export default defineConfig({
     // so the bundle works from file:// (null origin).
     SINGLE_FILE_BUILD && headlessClassicWorkersPlugin(),
     SINGLE_FILE_BUILD && headlessInlineWorkersPlugin(OUT_DIR, ENTRY_HTML),
+    // The offline download only (ESCSUITE-467): a Content-Security-Policy
+    // <meta> that admits no network source, injected after the worker
+    // inlining above so its script hashes cover the bytes that ship. The
+    // decode worker is the blob: URL that inlining creates. Policy and
+    // rationale: scripts/offline-csp.mjs; what it does not cover: docs/VERIFY.md.
+    process.env.VITE_BUILD_MODE === 'standalone' && process.env.VITE_HEADLESS !== 'true' &&
+      offlineCspPlugin({
+        htmlPath: join(OUT_DIR, ENTRY_HTML),
+        extra: OFFLINE_CSP_EXTRA.artist,
+      }),
     // Run with ANALYZE=true to generate bundle-stats.html
     process.env.ANALYZE === 'true' && visualizer({
       filename: 'bundle-stats.html',

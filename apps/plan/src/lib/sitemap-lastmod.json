@@ -21,11 +21,11 @@
     "sha256": "917eda6963a6673cd0b562171902f8aa1007e94b27da4cc6b243b81bfa3a8ad5"
   },
   "/limitations": {
-    "lastmod": "2026-11-24",
+    "lastmod": "2026-11-25",
     "sources": [
       "src/pages/Limitations/Limitations.tsx",
       "src/pages/Limitations/limitations.ts"
     ],
-    "sha256": "fd8b4437f7bf7c6126a4eaa5bb0b374d4ac0a891435132a165c6adb9ad5f4554"
+    "sha256": "4a83ea38a875b293d720055af049ae6258ee23b582b3e572b4f8dd273b6b7242"
   }
 }

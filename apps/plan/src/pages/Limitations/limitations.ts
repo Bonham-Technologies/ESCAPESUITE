@@ -170,6 +170,16 @@ export const LIMITATIONS: Limitation[] = [
     sources: [repoFile('apps/craft/src/hooks/useFloatingControlsWindow.ts'), ticket('ESCSUITE-400')],
   },
   {
+    id: 'offline-lockdown',
+    title: 'Offline file: what its lockdown does not cover',
+    body: [
+      'Each offline file carries a Content-Security-Policy: a rule, written into the top of the file, that the browser enforces. It lets the page load only what is inside the file, and refuses anything the page tries to fetch from or send to a server, with the exceptions below. Verify your download shows how to read it.',
+      'It governs the page, not the browser. It does not stop the tab from going to another address, such as a link you click. It does not cover the browser’s own traffic, such as updates, safe-browsing checks, or the speech language pack the browser downloads the first time you transcribe in ESCAPEARTIST. It has no rule for WebRTC peer-to-peer connections, though neither offline app contains WebRTC code. And it does not cover browser extensions, which can read the page and make requests of their own. For a computer that must not reach a network, disconnect the computer.',
+      'Because the file contacts no server, ESCAPEARTIST’s ?video= address works there only when it carries the video itself (a data: address). A video address on a server is refused, and the editor says so.',
+    ],
+    sources: [repoFile('docs/VERIFY.md'), repoFile('scripts/offline-csp.mjs'), ticket('ESCSUITE-467')],
+  },
+  {
     id: 'screen-stays-on',
     title: 'Screen-on lock: only while the ESCAPECRAFT tab is visible',
     body: [
@@ -206,7 +216,7 @@ export const LIMITATIONS: Limitation[] = [
       'An event adds at most a few short labels and numbers: which tool, which export format, a length in whole seconds, a media type (video, image or audio), and for a failed export its error type and how far it got. Nothing you record, import, type or export is sent, and neither are file names.',
       'A website that embeds ESCAPECRAFT or ESCAPEARTIST in its own page can put its own address, a video’s address, a title, a whole project or a window name into the app’s address after a ?. None of that is sent, and neither is the random ID ESCAPECRAFT adds when it hands a recording to ESCAPEARTIST.',
       'Both kinds of record go to /_vercel/insights/ on escapesuite.tech itself, not to another site. Our code sets no cookies.',
-      'The offline build contains no analytics code at all. It makes no network requests unless you give ESCAPEARTIST a video address to load, and then it fetches only that address.',
+      'The offline build contains no analytics code at all, and makes no network requests. Its built-in lockdown refuses any server address the page tries to load, a video address given to ESCAPEARTIST included (see “Offline file: what its lockdown does not cover”).',
     ],
     sources: [
       repoFile('docs/reference/vercel-analytics.md'),
