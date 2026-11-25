@@ -105,4 +105,9 @@ types); nothing the app writes produces one.
 2×, silence above 2×), `src/components/ClipEditor/SpeedSection.test.tsx`, and
 the Playwright spec `apps/e2e/tests/regressions/ESCSUITE-471.spec.ts` (2× from
 the inspector on the A/V fixture, a WebM export 2.5 s long with its silence and
-its pictures where the source's land at 2×).
+its pictures where the source's land at 2×), and
+`apps/e2e/tests/escapeartist/clip-speed-editing.spec.ts` (ESCSUITE-522: a 2×
+clip split at the playhead, trimmed by its end handle, every step undone and
+redone, saved and reopened in a fresh browser, each length read off the
+timeline; a linked screen and microphone take at 0.5×, its microphone's
+offset scaled and both rows cut at the same time).
