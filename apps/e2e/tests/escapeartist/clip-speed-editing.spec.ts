@@ -57,9 +57,11 @@ async function expectSpans(clips: Locator, pxPerSec: number, expected: Span[], w
     .poll(
       async () => {
         const spans = await spansOf(clips, pxPerSec)
-        const off = spans.some(
-          (s, i) => Math.abs(s.start - expected[i].start) > TOLERANCE || Math.abs(s.end - expected[i].end) > TOLERANCE
-        )
+        const off =
+          spans.length !== expected.length ||
+          spans.some(
+            (s, i) => Math.abs(s.start - expected[i].start) > TOLERANCE || Math.abs(s.end - expected[i].end) > TOLERANCE
+          )
         return off ? spans.map((s) => `${s.start.toFixed(3)}–${s.end.toFixed(3)}`).join(', ') : 'as expected'
       },
       { message: `${what}: clips at ${expected.map((s) => `${s.start}–${s.end}`).join(', ')} s` }
@@ -366,6 +368,8 @@ test.describe('Clip speed: editing a sped clip (ESCSUITE-522)', () => {
     test('at 0.5× both parts double in length, the microphone stays half a second (now one second) behind, and a cut, undo and redo keep them in step', async ({
       page,
     }) => {
+      // About fifty polled checks; one CI worker can be slow.
+      test.setTimeout(60_000)
       const SPEED = 0.5
       const CUT_AT = 3 // timeline seconds
       const pxPerSec = await pixelsPerSecond(screenClips(page).first(), TAKE_SECONDS)
