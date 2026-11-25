@@ -14,6 +14,7 @@
 import { useCallback } from 'react';
 import type { Clip, Track } from '../../store/types';
 import { confirmAction } from '../../app/confirmAction';
+import { chordLabel, currentShortcutPlatform } from '../../utils/shortcutKeys';
 
 /** What the header buttons need that they cannot reach on their own. */
 export interface TrackHeaderActionsDeps {
@@ -79,7 +80,7 @@ export function useTrackHeaderActions({
 
     const trackClips = clips.filter(c => c.trackId === trackId);
     if (trackClips.length > 0) {
-      if (!(await confirmAction(`Delete track with ${trackClips.length} clip(s)? Ctrl+Z will bring it back.`, 'Delete track'))) {
+      if (!(await confirmAction(`Delete track with ${trackClips.length} clip(s)? ${chordLabel('Z', currentShortcutPlatform())} will bring it back.`, 'Delete track'))) {
         return;
       }
     }

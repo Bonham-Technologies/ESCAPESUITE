@@ -122,7 +122,7 @@ the first visit".
   cannot parse at all, one with an opaque origin (a `data:` URL, say), or one on any other scheme
   (the http(s)-only check is explicit rather than relying on the opaque-origin check alone,
   because Chromium serialises a `file:` URL's origin as the non-opaque string `'file://'`) is
-  ignored, with one console warning. The hosted deployment (escapesuite.io) sends `frame-ancestors 'self'` plus
+  ignored, with one console warning. The hosted deployment (escapesuite.tech) sends `frame-ancestors 'self'` plus
   `X-Frame-Options: SAMEORIGIN` from `vercel.json`, so it cannot be framed by other origins; a
   self-hosted or standalone build must set its own. Its `Permissions-Policy` keeps camera,
   microphone and screen capture to the same origin, which a same-origin host frame already is

@@ -105,11 +105,12 @@ export function SpeedSection({ clipId, speed, onSpeedChange, linked, hasPicture,
         </div>
         {sound && <p className={styles.hint}>{sound}</p>}
         {linked && <p className={styles.hint}>Its linked parts change speed with it.</p>}
-        {refused && (
-          <p className={styles.hint} role="status">
-            Not changed: a clip on its row is in the way, or a track it would move is locked.
-          </p>
-        )}
+        {/* Always in the page, its text set on a refusal (ESCSUITE-523): a
+            screen reader announces a change to a live region already there,
+            not a region inserted with its text. */}
+        <p className={`${styles.hint} ${styles.liveHint}`} role="status">
+          {refused ? 'Not changed: a clip on its row is in the way, or a track it would move is locked.' : null}
+        </p>
       </div>
     </CollapsibleSection>
   );

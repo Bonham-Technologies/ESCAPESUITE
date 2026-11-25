@@ -351,10 +351,10 @@ describe('createFrameComposer', () => {
     expect(order.indexOf('fillRect')).toBeLessThan(order.indexOf('drawImage'))
   })
 
-  it('skips a seek that is already within half an output frame of the target', async () => {
+  it('skips a seek to the frame of the source the element already shows', async () => {
     await store('v1')
     const clips = [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1 })]
-    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]), [])
+    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1', frameRateSource: 'measured' })]), [])
     const playbackState = rewindElementSources(sources)
     const { canvas, ctx } = outputCanvas()
     const composeFrame = createFrameComposer({
@@ -367,17 +367,17 @@ describe('createFrameComposer', () => {
       projectSize: PROJECT,
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
-      frameRate: 10,
+      frameRate: 30,
     })
     const seeksBefore = media.seeks.length
 
-    // The element sits at 0 after the rewind. At 10 fps the tolerance is
-    // 0.4 / 10 = 40 ms, so a frame at t = 0.02 reuses the position it has and a
-    // frame at t = 0.1 does not.
-    await composeFrame(0.02)
+    // The element sits at 0 after the rewind, on frame 0 of the 30 fps source,
+    // a measured rate (ESCSUITE-505, `elementShowsFrameFor`): t = 0.01 is still frame 0 and
+    // reuses the position it has, t = 0.04 is frame 1 and does not.
+    await composeFrame(0.01)
     expect(media.seeks).toHaveLength(seeksBefore)
 
-    await composeFrame(0.1)
+    await composeFrame(0.04)
     expect(media.seeks).toHaveLength(seeksBefore + 1)
   })
 
@@ -1239,7 +1239,12 @@ describe('createFrameComposer seek wedge', () => {
     for (let i = 1; i <= MAX_LOGGED_SEEK_REQUESTS + 3; i++) await frame(composeFrame, i)
 
     expect(log).toHaveLength(MAX_LOGGED_SEEK_REQUESTS + 1)
-    expect(log[0].detail).toMatch(/^"slow\.webm" element 0, seek to 0\.0334 s: landed after \d+ ms \(seeking=false, readyState=4, wedged 0\/3\)$/)
+    expect(log[0].detail).toMatch(
+      new RegExp(
+        `^"slow\\.webm" element 0, seek to ${elementSeekTarget(1 / 30).toFixed(4)} s: landed after \\d+ ms ` +
+          `\\(seeking=false, readyState=4, wedged 0/3\\)$`
+      )
+    )
     expect(log[log.length - 1].detail).toBe(`Further slow seeks are not logged (the first ${MAX_LOGGED_SEEK_REQUESTS} are above)`)
   })
 
@@ -1376,5 +1381,181 @@ describe('createFrameComposer seek wedge', () => {
     for (let i = 0; i < 5; i++) await frame(composeFrame, i)
 
     expect(ctx.argsFor('drawImage')).toHaveLength(5)
+  })
+})
+
+// ESCSUITE-505: the skip window was 0.4 of an *output* frame whatever the
+// clip's speed or the source's rate, so a slowed clip of a high-rate source,
+// whose requests are closer together in source time than an output frame,
+// could skip a seek to the next source frame and repeat the one before. Each
+// frame here is read off the element the way a browser draws it: the frame of
+// the source whose start is at or before where the element sits.
+describe('createFrameComposer on a slowed clip of a high-rate source (ESCSUITE-505)', () => {
+  /** The frame of an `rate` fps source an element sitting at `time` shows. */
+  const frameAt = (time: number, rate: number) => Math.floor(time * rate + 1e-9)
+
+  // In-points: on a frame start, a third of the way into one, two thirds of the
+  // way into one (the requests straddle a frame start right after a seek), and
+  // inside the 0.4-output-frame window of the rewound element at 0.
+  const inPoints = (rate: number) => [0, 1 / (3 * rate), 2 / (3 * rate), 0.01, 0.5 + 2 / (3 * rate)]
+
+  it.each([
+    [60, 0.25],
+    [60, 0.5],
+    [120, 0.25],
+    [120, 0.5],
+  ])('shows the requested frame of a %i fps source at %s× on every output frame', async (rate, speed) => {
+    await store('v1')
+    const wrong: string[] = []
+    for (const inPoint of inPoints(rate)) {
+      const clips = [makeClip({ sourceVideoId: 'v1', startTime: inPoint, duration: 1, endTime: inPoint + 1, speed })]
+      const sources = await loadElementSources(
+        clips,
+        sourceMapOf([makeSourceVideo({ id: 'v1', frameRate: rate, frameRateSource: 'measured' })]),
+        []
+      )
+      const playbackState = rewindElementSources(sources)
+      const { canvas, ctx } = outputCanvas()
+      const composeFrame = createFrameComposer({
+        ctx: ctx as unknown as CanvasRenderingContext2D,
+        canvas,
+        clips,
+        tracks: [makeTrack()],
+        sources,
+        playbackState,
+        projectSize: PROJECT,
+        outputSize: PROJECT,
+        drawOptions: { filterScale: 1 },
+        frameRate: 30,
+      })
+      const video = sources.videoElements.get('v1')!
+
+      for (let n = 0; n < 24; n++) {
+        await composeFrame(n / 30)
+        const sourceTime = inPoint + (n / 30) * speed
+        // The frame a seek for this request shows (`elementSeekTarget`).
+        const wanted = frameAt(elementSeekTarget(sourceTime), rate)
+        const shown = frameAt(video.currentTime, rate)
+        if (shown !== wanted) wrong.push(`in ${inPoint.toFixed(4)} frame ${n}: showed ${shown}, wanted ${wanted}`)
+      }
+      releaseElementSources(sources)
+    }
+    expect(wrong).toEqual([])
+  })
+
+  // The element exporters' old window, 0.4 of an output frame (13.3 ms at 30
+  // fps), stays as a ceiling: half a frame of a source recorded at 30 fps is
+  // 16.7 ms, and inside that band only the ideal 30 fps grid would decide. An
+  // ESCAPECRAFT take (capture-time timestamps) or a 60 fps file recorded as 30
+  // shows a different picture on every request of a 0.5× clip, so each is
+  // seeked, as before ESCSUITE-505 — without the ceiling every other one was
+  // skipped.
+  it('seeks every request of a 0.5× clip of a source recorded at 30 fps, as before', async () => {
+    await store('v1')
+    const clips = [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1, speed: 0.5 })]
+    // An ESCAPECRAFT take: its 30 is the rate it was configured to record at.
+    const sources = await loadElementSources(
+      clips,
+      sourceMapOf([makeSourceVideo({ id: 'v1', frameRate: 30, frameRateSource: 'configured' })]),
+      []
+    )
+    const playbackState = rewindElementSources(sources)
+    const { canvas, ctx } = outputCanvas()
+    const composeFrame = createFrameComposer({
+      ctx: ctx as unknown as CanvasRenderingContext2D,
+      canvas,
+      clips,
+      tracks: [makeTrack()],
+      sources,
+      playbackState,
+      projectSize: PROJECT,
+      outputSize: PROJECT,
+      drawOptions: { filterScale: 1 },
+      frameRate: 30,
+    })
+    const seeksBefore = media.seeks.length
+
+    for (let n = 0; n < 12; n++) await composeFrame(n / 30)
+
+    // The rewound element sits at 0, so the request at 0 needs no seek.
+    const expected = Array.from({ length: 11 }, (_, i) => elementSeekTarget((i + 1) / 60))
+    expect(media.seeks.slice(seeksBefore)).toEqual(expected)
+  })
+
+  // Firefox's imports are never measured (ESCSUITE-327): every video is
+  // stored at 30, `frameRateSource: 'assumed'`. A grid at that placeholder rate
+  // says nothing about where a 50 fps file's frames start, and deciding on it
+  // skipped seeks to the next frame exactly as the old window did (the e2e
+  // spec's 29 wrong frames in Firefox).
+  it.each([0.25, 0.4])(
+    'shows the requested frame of a 50 fps file stored at an assumed 30 fps, at %s×, on every output frame',
+    async (speed) => {
+      await store('v1')
+      const wrong: string[] = []
+      for (const inPoint of [0.2, 0.21, 1.21]) {
+        const clips = [makeClip({ sourceVideoId: 'v1', startTime: inPoint, duration: 1, endTime: inPoint + speed, speed })]
+        const sources = await loadElementSources(
+          clips,
+          sourceMapOf([makeSourceVideo({ id: 'v1', frameRate: 30, frameRateSource: 'assumed' })]),
+          []
+        )
+        const playbackState = rewindElementSources(sources)
+        const { canvas, ctx } = outputCanvas()
+        const composeFrame = createFrameComposer({
+          ctx: ctx as unknown as CanvasRenderingContext2D,
+          canvas,
+          clips,
+          tracks: [makeTrack()],
+          sources,
+          playbackState,
+          projectSize: PROJECT,
+          outputSize: PROJECT,
+          drawOptions: { filterScale: 1 },
+          frameRate: 30,
+        })
+        const video = sources.videoElements.get('v1')!
+
+        for (let n = 0; n < 30; n++) {
+          await composeFrame(n / 30)
+          const wanted = frameAt(elementSeekTarget(inPoint + (n / 30) * speed), 50)
+          const shown = frameAt(video.currentTime, 50)
+          if (shown !== wanted) wrong.push(`in ${inPoint} frame ${n}: showed ${shown}, wanted ${wanted}`)
+        }
+        releaseElementSources(sources)
+      }
+      expect(wrong).toEqual([])
+    }
+  )
+
+  it('still skips the seeks that would show the same frame: once per source frame at 0.25× of 60 fps', async () => {
+    await store('v1')
+    const clips = [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1, speed: 0.25 })]
+    const sources = await loadElementSources(
+      clips,
+      sourceMapOf([makeSourceVideo({ id: 'v1', frameRate: 60, frameRateSource: 'measured' })]),
+      []
+    )
+    const playbackState = rewindElementSources(sources)
+    const { canvas, ctx } = outputCanvas()
+    const composeFrame = createFrameComposer({
+      ctx: ctx as unknown as CanvasRenderingContext2D,
+      canvas,
+      clips,
+      tracks: [makeTrack()],
+      sources,
+      playbackState,
+      projectSize: PROJECT,
+      outputSize: PROJECT,
+      drawOptions: { filterScale: 1 },
+      frameRate: 30,
+    })
+    const seeksBefore = media.seeks.length
+
+    // 16 output frames are 8 frames of the source at 0.25×, two each. The
+    // rewound element already shows the first, so seven seeks: one for each new
+    // source frame, none for the second output frame of each.
+    for (let n = 0; n < 16; n++) await composeFrame(n / 30)
+
+    expect(media.seeks.slice(seeksBefore)).toEqual([1, 2, 3, 4, 5, 6, 7].map((k) => elementSeekTarget(k / 60)))
   })
 })

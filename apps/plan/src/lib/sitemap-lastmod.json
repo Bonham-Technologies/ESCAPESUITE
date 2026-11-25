@@ -1,0 +1,31 @@
+{
+  "/": {
+    "lastmod": "2026-11-18",
+    "sources": [
+      "src/pages/Home.tsx"
+    ],
+    "sha256": "1c9416e51deff6f20e70832881713971542ae5ec3f01a86fc85e6d88906f9369"
+  },
+  "/privacy": {
+    "lastmod": "2026-11-24",
+    "sources": [
+      "src/pages/Legal/Privacy.tsx"
+    ],
+    "sha256": "e03b7121eb969027eb4b9a01b5e2a2c1cfdd9d3a433c96073e554d24a8ed3197"
+  },
+  "/terms": {
+    "lastmod": "2026-11-24",
+    "sources": [
+      "src/pages/Legal/Terms.tsx"
+    ],
+    "sha256": "917eda6963a6673cd0b562171902f8aa1007e94b27da4cc6b243b81bfa3a8ad5"
+  },
+  "/limitations": {
+    "lastmod": "2026-11-25",
+    "sources": [
+      "src/pages/Limitations/Limitations.tsx",
+      "src/pages/Limitations/limitations.ts"
+    ],
+    "sha256": "4a83ea38a875b293d720055af049ae6258ee23b582b3e572b4f8dd273b6b7242"
+  }
+}

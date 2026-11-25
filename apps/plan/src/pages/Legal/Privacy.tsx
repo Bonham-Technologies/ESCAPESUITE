@@ -8,7 +8,7 @@ export default function Privacy() {
     <div className={styles.legal}>
       <header className={styles.header}>
         <h1 className={styles.title}>Privacy Policy</h1>
-        <p className={styles.lastUpdated}>Last updated: November 15, 2026</p>
+        <p className={styles.lastUpdated}>Last updated: November 23, 2026</p>
       </header>
 
       <div className={styles.content}>
@@ -19,9 +19,10 @@ export default function Privacy() {
             your device and are never uploaded to our servers.
           </p>
           <p>
-            The hosted service at escapesuite.io requires no account and no sign-in. The only data we
+            The hosted service at escapesuite.tech requires no account and no sign-in. The only data we
             collect is anonymous usage analytics via Vercel, described below. The downloadable offline
-            build makes no network requests at all and transmits nothing to us.
+            build makes no network requests of its own; it fetches a video only when you give
+            ESCAPEARTIST that video’s address. It transmits nothing to us.
           </p>
         </div>
 
@@ -40,7 +41,7 @@ export default function Privacy() {
 
         <h3>2.1 Usage Analytics (Hosted Site Only)</h3>
         <p>
-          The hosted site at escapesuite.io uses Vercel Web Analytics to understand how our
+          The hosted site at escapesuite.tech uses Vercel Web Analytics to understand how our
           applications are used. It records:
         </p>
         <ul>
@@ -141,13 +142,16 @@ export default function Privacy() {
           <li>No account or sign-in is required</li>
           <li>No data is sent to our servers</li>
           <li>No analytics are collected</li>
-          <li>The build makes no network requests at all — no telemetry of any kind</li>
+          <li>
+            The build makes no network requests of its own; it fetches a video only when you give
+            ESCAPEARTIST that video’s address, and then only that address. No telemetry of any kind
+          </li>
           <li>The software works entirely offline</li>
         </ul>
 
         <h2>7. Data Retention</h2>
         <ul>
-          <li><strong>Analytics data:</strong> Retained for 90 days, then deleted</li>
+          <li><strong>Analytics data:</strong> Kept by Vercel for the reporting window of our plan</li>
           <li><strong>Local data:</strong> Controlled entirely by you; delete anytime via your browser settings</li>
         </ul>
 

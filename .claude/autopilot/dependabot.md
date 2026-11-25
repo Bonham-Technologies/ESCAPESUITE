@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v34. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v40. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: dependabot role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and `.claude/rules/autopilot.local.md` load in every session and apply here too.
@@ -56,8 +56,8 @@ For each untriaged PR:
 3. **Align on the PR.** Push the alignment, and any fix for a breakage (the smallest
    change that keeps the upgrade), as normal commits to Dependabot's branch. Never
    force-push it. When `main` moves, merge `main` into the branch; never rebase it.
-4. **Regression checks.** Run verify, then wait for `ci-status` to be green on the new
-   head. Anything the cloud can't check, such as a docker build or a deploy, is listed
+4. **Regression checks.** Run the prep command, if any, and verify, then wait for `ci-status` to be green on the new
+   head (a flaky red gets builder **Flaky red**). Anything the cloud can't check, such as a docker build or a deploy, is listed
    as "not checked", never as passing. For a major bump, or a PR you pushed commits to,
    then hand its whole diff to the `reviewer` (opus) and `qc` (fable) subagents (builder,
    **Formerly owner-merge**) before step 5.
@@ -89,6 +89,6 @@ For each untriaged PR:
      triage comment carries `Review: reviewer pass, qc pass` and says `Formerly
      owner-merge: dependency major` or `Formerly owner-merge: pushed alignment`.
 
-   Otherwise label it `needs-owner` with the reason. Before you push to a PR with
+   Otherwise label it `needs-owner` with the reason, turning its auto-merge off first if it is on. Before you push to a PR with
    auto-merge on, turn it off (builder, **New commits**). If the verdict is `merge` but
    `ci-status` is still pending and auto-merge is off, leave it open for a later sweep.

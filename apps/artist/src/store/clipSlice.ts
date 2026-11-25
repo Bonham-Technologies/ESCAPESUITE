@@ -19,7 +19,7 @@ import { cutEditorBlock, cutHeldByLock, cutTimeRanges, linkedRows, normaliseRang
 import { isSaneTransformWrite } from './transformGuard';
 import { isExtendableClip } from './extendableClip';
 import { overlapsSpan, startsAtOrAfter } from './timelineSnapping';
-import { canHaveSpeed, clipSpeed, clipTimelineLength, isValidClipSpeed, sourceTimeAt } from './clipSpeed';
+import { canHaveSpeed, clipSpeed, clipTimelineLength, isValidClipSpeed, sourceTimeAt, speedGroup } from './clipSpeed';
 import {
   maskForPlacement,
   overlayPlacementToTransform,
@@ -761,7 +761,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     if (!clip || !canHaveSpeed(clip, sourceVideos)) return false;
 
     // The clip and every linked media clip: a take's parts play in step.
-    const group = [clip, ...linkedPartners(clips, clip).filter((p) => canHaveSpeed(p, sourceVideos))];
+    const group = speedGroup(clips, clip, sourceVideos);
     if (group.some((c) => isTrackLocked(tracks, c.trackId))) return false; // ESCSUITE-84
     if (group.every((c) => clipSpeed(c) === speed)) return false;
 

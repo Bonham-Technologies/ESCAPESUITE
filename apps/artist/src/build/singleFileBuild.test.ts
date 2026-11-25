@@ -8,9 +8,9 @@ import { isSingleFileBuild } from '../../singleFileBuild.js'
 //
 // The predicate itself lives beside vite.config.ts as plain JS
 // (../../singleFileBuild.js, review round 1 NIT), not under src/ as
-// TypeScript — vite.config.ts importing a .ts file breaks `tsc -b` (TS5097)
-// without an extensionless import tripping Vite's `configLoader: 'native'`
-// warning. This test stays under src/build/ regardless, because vitest's
+// TypeScript: at the time vite.config.ts could not import a .ts file without
+// `tsc -b` failing (TS5097); ESCSUITE-488 has since allowed .ts imports there
+// (singleFileBuild.js explains). This test stays under src/build/ regardless, because vitest's
 // `test.include` only looks under src/**.
 describe('isSingleFileBuild', () => {
   it('is true for the headless build', () => {

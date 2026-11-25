@@ -862,6 +862,80 @@ describe('WebCodecsRecorder', () => {
     })
   })
 
+  // --- Firefox's colour label (ESCSUITE-503) -------------------------------
+
+  // Firefox's VP9 encoder, fed a canvas-built frame, converts with the BT.601
+  // matrix but reports BT.709 (ESCSUITE-284; a CRAFT take measured the same,
+  // ESCSUITE-503). Firefox has no MediaStreamTrackProcessor, so every Firefox
+  // take is built from canvas frames, and the recorder corrects that exact
+  // report before it reaches the key frame headers and the muxer's Colour
+  // element, as ARTIST's WebM export does.
+  describe("Firefox's colour label", () => {
+    const FIREFOX_UA = 'Mozilla/5.0 (X11; Linux x86_64; rv:159.0) Gecko/20100101 Firefox/159.0'
+    const firefoxReport = () => ({
+      decoderConfig: {
+        codec: 'vp09.00.10.08',
+        colorSpace: { primaries: 'bt709', transfer: 'bt709', matrix: 'bt709', fullRange: false } as VideoColorSpaceInit,
+      },
+    })
+
+    /** Hand the primary encoder one key frame with `meta`; what the muxer got for it, and its header's color_space. */
+    async function muxOneKeyFrame(meta: EncodedVideoChunkMetadata) {
+      const { EncodedPacket: RealPacket } = await vi.importActual<typeof import('mediabunny')>('mediabunny')
+      // A VP9 profile 0 key frame header whose color_space (bits 32-34) says 0, "unknown", as Firefox writes it.
+      const keyframe = Uint8Array.from([0x82, 0x49, 0x83, 0x42, 0x00, 0x77, 0xf0, 0x43])
+      vi.mocked(EncodedPacket.fromEncodedChunk).mockReturnValueOnce(new RealPacket(keyframe, 'key', 0, 1 / 30))
+      lastVideoEncoder().init.output({} as never, meta)
+      await flush()
+      const [added] = getMediabunnyState().videoSources[0].packets
+      const data = (added.packet as InstanceType<typeof RealPacket>).data
+      return { meta: added.meta as EncodedVideoChunkMetadata | undefined, colourSpace: data[4] >> 5 }
+    }
+
+    it('relabels the matrix SMPTE 170M in the key frame header and the muxer metadata, in Firefox', async () => {
+      vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(FIREFOX_UA)
+      await recorder.initialize(screenStream, null, null, defaultConfig)
+      const meta = firefoxReport()
+
+      const muxed = await muxOneKeyFrame(meta)
+
+      expect(muxed.colourSpace).toBe(3) // CS_SMPTE_170
+      expect(muxed.meta?.decoderConfig?.colorSpace).toEqual({
+        primaries: 'bt709',
+        transfer: 'bt709',
+        matrix: 'smpte170m',
+        fullRange: false,
+      })
+      // What the encoder handed over is not written into.
+      expect(meta.decoderConfig.colorSpace.matrix).toBe('bt709')
+    })
+
+    it('leaves the same report alone in any other browser', async () => {
+      await recorder.initialize(screenStream, null, null, defaultConfig)
+      const meta = firefoxReport()
+
+      const muxed = await muxOneKeyFrame(meta)
+
+      expect(muxed.colourSpace).toBe(2) // CS_BT_709
+      expect(muxed.meta).toBe(meta)
+    })
+
+    // Only canvas-built frames were measured. A Firefox that ships
+    // MediaStreamTrackProcessor hands the encoder the capture's own frames,
+    // which nobody has measured, so their report passes through.
+    it('leaves the report alone in Firefox when frames come off a MediaStreamTrackProcessor', async () => {
+      vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(FIREFOX_UA)
+      installTrackProcessorDouble()
+      await recorder.initialize(screenStream, null, null, defaultConfig)
+      const meta = firefoxReport()
+
+      const muxed = await muxOneKeyFrame(meta)
+
+      expect(muxed.colourSpace).toBe(2) // CS_BT_709
+      expect(muxed.meta).toBe(meta)
+    })
+  })
+
   // --- audio capture -------------------------------------------------------
 
   describe('audio capture', () => {

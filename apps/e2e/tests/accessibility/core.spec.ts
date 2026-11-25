@@ -27,6 +27,7 @@ import {
   openExportDialog,
   openExportAdvancedOptions,
   makeToneWav,
+  exportButtonName,
 } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 import { AV_FIXTURE_WEBM } from '../../utils/mediaHealth'
@@ -1671,7 +1672,7 @@ test.describe('Color Contrast', () => {
         await openExportDialog(page)
         await openExportAdvancedOptions(page)
         await page.getByRole('radio', { name: /MP4/ }).check()
-        await page.getByRole('button', { name: 'Download MP4' }).first().click()
+        await page.getByRole('button', { name: exportButtonName('mp4') }).first().click()
 
         const bar = page.getByRole('dialog').getByRole('progressbar', { name: 'Export progress' })
         await expect(bar).toBeVisible({ timeout: 30_000 })
@@ -1903,7 +1904,7 @@ test.describe('Color Contrast', () => {
       const minGap = dialog.getByLabel('Minimum gap (s)')
       await minGap.fill('99')
       await expect(minGap).toHaveAttribute('aria-invalid', 'true')
-      await expect(dialog.getByText('Enter a number from 0 to 60.')).toBeVisible()
+      await expect(dialog.getByText('Enter a number from 0.1 to 60.')).toBeVisible()
       const removeAll = dialog.getByRole('button', { name: 'Remove all' })
       // ESCSUITE-449: the lock is named on open and Remove all is disabled.
       await expect(removeAll).toBeDisabled()

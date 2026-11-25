@@ -1,4 +1,5 @@
 import { ClipEditor } from '../components/ClipEditor/ClipEditor';
+import type { ShowNotification } from './useNotification';
 import styles from '../App.module.css';
 
 interface InspectorSidebarProps {
@@ -6,13 +7,15 @@ interface InspectorSidebarProps {
   collapsed: boolean;
   /** Flip the inspector open or shut. */
   onToggle: () => void;
+  /** The editor's notice channel, passed to the clip editor (ESCSUITE-521). */
+  showNotification?: ShowNotification;
 }
 
 /**
  * The right sidebar: the inspector's header and collapse button, with the
  * clip editor underneath while it is open.
  */
-export function InspectorSidebar({ collapsed, onToggle }: InspectorSidebarProps) {
+export function InspectorSidebar({ collapsed, onToggle, showNotification }: InspectorSidebarProps) {
   return (
     <aside className={`${styles.propertiesSidebar} ${collapsed ? styles.inspectorCollapsed : ''}`} aria-labelledby="inspector-title">
       <div className={styles.sidebarHeader}>
@@ -33,7 +36,7 @@ export function InspectorSidebar({ collapsed, onToggle }: InspectorSidebarProps)
           </svg>
         </button>
       </div>
-      {!collapsed && <ClipEditor />}
+      {!collapsed && <ClipEditor showNotification={showNotification} />}
     </aside>
   );
 }

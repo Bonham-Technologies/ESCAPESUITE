@@ -20,7 +20,7 @@ describe('ESCAPECRAFT structured data', () => {
     expect(data['@context']).toBe('https://schema.org')
     expect(data['@type']).toBe('WebApplication')
     expect(data.name).toBe('ESCAPECRAFT')
-    expect(data.url).toBe('https://www.escapesuite.io/craft/')
+    expect(data.url).toBe('https://escapesuite.tech/craft/')
     expect(html).toContain(`<link rel="canonical" href="${data.url}" />`)
     expect(data.applicationCategory).toBe('MultimediaApplication')
     expect(data.operatingSystem).toBe('Any (web browser)')

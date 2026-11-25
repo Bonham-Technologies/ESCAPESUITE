@@ -1,5 +1,5 @@
 // Build-time configuration.
-// 'saas' (default) = hosted at escapesuite.io (Vercel Analytics enabled).
+// 'saas' (default) = hosted at escapesuite.tech (Vercel Analytics enabled).
 // 'standalone' = offline single-file build (no analytics, no network).
 //
 // Vite inlines `import.meta.env.VITE_BUILD_MODE`, so `BUILD_MODE` is a string
@@ -60,7 +60,7 @@ export const editorUrl = (params?: Record<string, string>): string => {
 // controls the app's URL, so a hostile framer would simply supply its own
 // origin. Refusing to be framed at all is `Content-Security-Policy:
 // frame-ancestors` on the deployment serving the app, not a URL parameter.
-// The hosted deployment (escapesuite.io) sends `frame-ancestors 'self'` from vercel.json;
+// The hosted deployment (escapesuite.tech) sends `frame-ancestors 'self'` from vercel.json;
 // self-hosted builds must set their own.
 //
 // The value need not be a bare origin: any http:/https: value `new URL(v)`

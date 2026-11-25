@@ -9,9 +9,10 @@
     "moduleResolution": "bundler",
     "allowSyntheticDefaultImports": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
 
     /* Linting */
     "strict": true
   },
-  "include": ["vite.config.ts"]
+  "include": ["vite.config.ts", "nodeTestSuites.ts"]
 }

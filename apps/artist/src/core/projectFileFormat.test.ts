@@ -1,5 +1,5 @@
 // The .veditor v2 container (ESCSUITE-260), tested directly: no storage, no
-// DOM beyond Blob. src/test/setup.ts makes Node's Blob the global one.
+// DOM beyond Blob. src/test/setupGlobals.ts makes Node's Blob the global one.
 import { describe, it, expect } from 'vitest'
 import {
   CONTAINER_VERSION,

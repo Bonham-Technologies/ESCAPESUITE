@@ -85,7 +85,8 @@ pnpm --filter=@escapesuite/<pkg> exec tsc -b --noEmit
 pnpm --filter=@escapesuite/<pkg> exec eslint .
 ```
 
-Whole repo: `pnpm test`, `pnpm lint`, `pnpm -r run typecheck`. CI's single required check is
+Whole repo: `pnpm test`, `pnpm lint`, `pnpm -r run typecheck`, `pnpm test:scripts`. After editing a hub
+page's source (`apps/plan/src/pages/`), run `pnpm sitemap:stamp` and commit the manifest. CI's single required check is
 `ci-status` (see `docs/reference/ci-cd-pipeline.md`).
 
 ## Coverage policy

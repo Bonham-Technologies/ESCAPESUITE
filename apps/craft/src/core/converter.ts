@@ -903,8 +903,8 @@ async function askMP4Support(): Promise<MP4SupportProbe> {
  * Two steps. `webm-duration-fix` writes the Duration and the SeekHead, and a
  * Cues element; then `writeKeyframeCues` replaces that Cues element with one
  * CuePoint per video keyframe, because the library indexes only SimpleBlocks
- * and Chrome writes a composited-PiP take's alpha-VP9 frames as BlockGroups, so
- * it left those takes' Cues empty — which Firefox cannot seek (ESCSUITE-305,
+ * and Chrome wrote a composited-PiP take's alpha-VP9 frames as BlockGroups (until
+ * ESCSUITE-507 made the compositor's canvas opaque), so it left those takes' Cues empty — which Firefox cannot seek (ESCSUITE-305,
  * ESCSUITE-322). A failure in either step rejects, and the save reports it as
  * `NOT_SEEKABLE`.
  */

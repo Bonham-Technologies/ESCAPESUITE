@@ -33,10 +33,17 @@ what is already stored.
   Cluster, except that it **forces** a Cluster on a delta frame once one would pass 32.767 s; the
   video cue on such a Cluster is dropped (ESCSUITE-359, below). The result keeps the original's MIME type.
   **Packet bytes are copied exactly** since Mediabunny 1.66.0: up to 1.65 its muxer also rewrote
-  every VP9 key frame header's `color_space` from the source's Colour element
-  (`fixVP9ColorSpace`). The remux does not restore that — the export does, for frames it encodes
-  (`webm-export-reliability.md`, ESCSUITE-284) — so a remuxed take's headers stay as its encoder
-  wrote them (an ESCAPECRAFT WebCodecs take's already carry the reported matrix). **Alpha is preserved**: Mediabunny reads a
+  every VP9 key frame header's `color_space` (`fixVP9ColorSpace`) from the matrix of the decoder
+  configuration it was handed. The remux hands it the source track's, whose matrix is the Colour
+  element's where that names one, and otherwise the one the first key frame header implies. So up
+  to 1.65 the header took the Colour element's matrix where Mediabunny's table had a code for it
+  (BT.709 2, BT.470BG 1, SMPTE 170M 3, RGB 7) and 0, "unknown", for any other matrix (BT.2020,
+  SMPTE 240M), although VP9 has codes for those; a file with no
+  Colour element kept its header, except that a BT.2020 header (5) became 0. The remux does not
+  restore that — the export does, for frames it encodes (`webm-export-reliability.md`,
+  ESCSUITE-284) — so a remuxed take's headers stay as its encoder wrote them (an ESCAPECRAFT
+  WebCodecs take's already carry the reported matrix). See **Colour after repair** below for the
+  measurement (ESCSUITE-504): the repair shifts no colour. **Alpha is preserved**: Mediabunny reads a
   BlockGroup's BlockAdditional (BlockAddID 1) on an `AlphaMode` 1 track as `sideData.alpha` and
   writes it back the same way on a track it marks `AlphaMode` 1 — pinned over a hand-built
   BlockGroup+BlockAdditions WebM (`test/fixtures/webmFixture.ts`) by packet count, timestamp,
@@ -71,6 +78,115 @@ what is already stored.
   and every other type come back as the same object. Pinned by
   `videoProcessor.seekIndexFirst.test.ts` (media doubles that wedge only while they hold the raw
   file).
+
+## Colour after repair (ESCSUITE-504)
+
+ESCSUITE-485 asked whether an imported, repaired Firefox VP9 recording previews with a colour
+shift since Mediabunny 1.66 dropped the header rewrite, and answered from the code. Measured on
+2026-11-23 in Firefox 159 and Chromium 159 (Playwright's headless builds, Linux): **the repair
+shifts no colour.** In both browsers, ARTIST's preview and a plain `<video>` read the same colours
+after the repair as before it, to the code value.
+
+- **Firefox's MediaRecorder records no VP9.** Firefox 159 answers
+  `MediaRecorder.isTypeSupported('video/webm;codecs=vp9')` false, and its constructor throws
+  NotSupportedError for that type. It records VP8, with no Cues and no Colour element. A Firefox
+  VP9 WebM comes only from WebCodecs (an ESCAPECRAFT take, an ARTIST export), which Mediabunny
+  writes with Cues, so the import never repairs one. The 1.65 rewrite was VP9-only, so it never
+  touched a Firefox MediaRecorder file either.
+- **Chromium 159's MediaRecorder** writes VP9 with a Cues index the probe honours, so as made it
+  is not repaired. It labels the file BT.709 full range in both places: the key frame header
+  (`color_space` 2, `color_range` 1) and the Colour element (matrix 1, range 2, transfer 13,
+  primaries 1). For that file 1.65 wrote back the 2 the header already held.
+- **Method** (`apps/e2e/tests/regressions/ESCSUITE-504.spec.ts`, which runs in Chromium on every
+  PR and in Firefox in the Nightly): eight colour patches are drawn on a 640x360 canvas and
+  recorded with `canvas.captureStream()` and `MediaRecorder`. Both browsers' recordings are
+  committed (`apps/e2e/fixtures/mediarecorder-colour`), so each browser imports the other's file
+  as well as its own. The cases are Firefox's VP8 recording, and Chromium's VP9 recording with its
+  Cues emptied in place, which is the shape `webm-duration-fix` left on ESCAPECRAFT's takes. A
+  third case records afresh with the running browser's own MediaRecorder, using VP9 where the
+  browser offers it, so a Firefox that gains VP9 is measured on its next run. Each file is
+  imported into ARTIST and read four ways: by a plain `<video>` and by the preview canvas, each
+  before the repair (the stored row's bytes put back and the session restored) and after it. The
+  spec checks that the repair kept every video packet byte for byte and kept the Colour element's matrix.
+  It fails if any reading after the repair is more than 2/255 from the one before.
+- **Result**, as mean / max channel difference from the drawn RGB, out of 255. Each "before"
+  figure is the same as its "after" figure, `<video>` and preview alike:
+
+  | File | Firefox, before / after repair | Chromium, before / after repair |
+  |---|---|---|
+  | Firefox MediaRecorder, VP8 | 0.83 / 2, both | 0.83 / 2, both |
+  | Chromium MediaRecorder, VP9, Cues emptied | **9.04 / 35, both** | 0.79 / 2, both |
+
+  The 9.04 / 35 is **Firefox's decoder, not the repair**: it is there before the repair too.
+  Firefox reads Chromium's full-range BT.709 VP9 as limited-range BT.601, which fits its reading
+  to within a mean of 1.07. The drawn (228,61,99) reads (226,31,97). Its cause is the file's
+  **alpha layer**, not its range (ESCSUITE-507, below).
+
+### The cause: Firefox converts alpha VP9 as limited-range BT.601 (ESCSUITE-507)
+
+Measured on 2026-11-24 in Firefox 159 and Chromium 159 (Playwright's builds, Linux), reading the
+first frame of each file in a plain `<video>` against the drawn patches (mean / max, out of 255).
+
+- **Only the alpha layer triggers it.** Variants of `chromium-159-vp9.webm` edited byte by byte
+  (Cues and SeekHead dropped from all of them, which alone changes nothing): Colour element
+  removed, its Range set to limited, the key frame headers' `color_range` set to limited, or
+  both set to limited, all still read **9.04 / 35, limited-range BT.601** in Firefox. With the
+  alpha removed (each BlockGroup turned into a SimpleBlock without its BlockAdditions, AlphaMode
+  dropped) the same frames read **0.79 / 2, full-range BT.709**, as in Chromium, with or without
+  the Colour element; alpha removed and both labels set to limited, Firefox follows the label
+  like Chromium (6.71 / 15 in both). ffmpeg-encoded VP9 (libvpx) at 640x360 and 1280x720, BT.601
+  and BT.709, limited and full range, with and without alpha: every file without alpha reads as
+  its label says (0.29 to 1.54 mean), and every file with alpha reads as limited-range BT.601
+  (best fit 0.47 to 0.75), whatever its label or size. So neither the full range, the Colour
+  element, nor the SD size is the trigger.
+- **Why, from Firefox's source** (`mozilla-firefox/firefox`, main, read 2026-11-24): Firefox's
+  FFmpeg, Windows (WMF) and macOS (VideoToolbox) decoders all refuse a VP8/VP9 track with alpha,
+  so it goes to the bundled libvpx `VPXDecoder` on every platform. That decoder fills the
+  buffer's colour space and range from the frame, but a frame with alpha goes to
+  `VideoData::CreateAndCopyData(..., aAlphaPlane, ...)`, which converts to BGRA on the CPU with
+  `gfx::ConvertI420AlphaToARGB`, which calls `libyuv::I420AlphaToARGB`: libyuv's fixed
+  limited-range BT.601 matrix. The colour space and range are never passed. The picture is RGB
+  before any compositor sees it.
+- **Headed and headless alike.** Headed Firefox under Xvfb (still a software path) reads the same
+  9.04 / 35, and `drawImage`, `createImageBitmap` and a screenshot of the `<video>` agree
+  (ESCSUITE-504). Desktop Firefox on macOS and Windows with hardware compositing: **not
+  checked**. The source says the conversion happens on the CPU in the decoder, before the
+  compositor, on every platform, so it would show there too, but that is read, not measured.
+- **Who has the shape.** Chromium's MediaRecorder writes a VP9 alpha layer whenever the canvas
+  it records has an alpha channel, even with every pixel opaque (a `{ alpha: false }` canvas
+  gives SimpleBlocks with no BlockAdditions, though the track still says AlphaMode 1). Up to
+  this fix, ESCAPECRAFT's compositor canvas was such a canvas, so **every composited-PiP take
+  recorded in Chromium** carried one: a take recorded through ESCAPECRAFT read 16.91 mean / 45
+  max apart between Firefox and Chromium, the same take shape recorded after the fix 0 / 0.
+  ESCAPECRAFT's other takes never had it: its WebCodecs recorder draws on an `{ alpha: false }`
+  canvas and configures `VideoEncoder` without `alpha: 'keep'`, and a MediaRecorder take of a
+  raw screen or camera track has no alpha channel. Since ESCSUITE-507 the compositor's context is
+  `{ alpha: false }` (it fills every frame black first, so the channel carried nothing).
+- **Exports bake it in.** A WebM source is exported through `<video>` frames (ARTIST's
+  element path; the WebCodecs decode worker takes only H.264 MP4), so a Firefox export of the
+  alpha fixture reads 8.79 / 35, (224,32,95) for (228,61,99), in Firefox and in Chromium alike:
+  the shift is in the exported pixels. A Chromium export of the same file reads 1.46 / 4, and a
+  Firefox export of the opaque-canvas fixture 1.58 / 3.
+- **What is left**: composited-PiP takes recorded in Chromium before the fix, and any other
+  alpha VP9/VP8 WebM, still preview and export shifted in Firefox. ARTIST does not strip alpha:
+  it cannot tell an opaque alpha layer from a real one without decoding it, and dropping a real
+  one would trade transparency for colour. The cure is upstream (libyuv's
+  `I420AlphaToARGBMatrix` with the frame's colour space and range), tracked separately.
+- **Pinned by** `apps/e2e/tests/regressions/ESCSUITE-507.spec.ts`: a composited-PiP take
+  recorded in ESCAPECRAFT has no frame with BlockAdditions (Chromium, every PR; 58 of its frames
+  had them before the fix), and Chromium's opaque-canvas recording
+  (`fixtures/mediarecorder-colour/chromium-159-vp9-opaque.webm`) reads within 3/255 of the drawn
+  RGB in the running browser, Firefox in the Nightly. The alpha fixture's reading is annotated;
+  Chromium must read it within 3/255 too. `compositor.test.ts` pins the opaque context.
+- **Mediabunny 1.65 against 1.66, run over real bytes**: Chromium's recording and variants of it,
+  remuxed in Node through each version's `EncodedPacketSink` and `EncodedVideoPacketSource`
+  (the 1.65 package fetched for the comparison, not a dependency). Results under 1.65: header 0
+  with Colour BT.709 became 2; header 5 with Colour BT.709 became 2; with no Colour element,
+  header 0 stayed 0 and header 5 became 0. Under 1.66 every header stayed as it was. So a
+  repaired file can preview differently than it did before 1.66 only in two cases. One is a VP9
+  file with no usable Cues whose Colour element names a matrix its header does not. The other is
+  a BT.2020 header with no Colour element, which 1.66 keeps and 1.65 turned into "unknown".
+  Neither browser's MediaRecorder writes either one.
 
 ## Cues on delta frames (ESCSUITE-359)
 

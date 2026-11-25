@@ -25,7 +25,7 @@ Open the release you want and download your file and `SHA256SUMS.txt` into one f
 Always compare a file against the `SHA256SUMS.txt` **from the release you downloaded it from**.
 
 **About `-latest.html`.** `ESCAPECRAFT-latest.html` and `ESCAPEARTIST-latest.html` are
-replaced by a new build with every release. The escapesuite.io download buttons and
+replaced by a new build with every release. The escapesuite.tech download buttons and
 `.../releases/latest/download/...-latest.html` always give you the newest one, so its checksum
 changes every release. Download it together with
 `https://github.com/Bonham-Technologies/ESCAPESUITE/releases/latest/download/SHA256SUMS.txt`.

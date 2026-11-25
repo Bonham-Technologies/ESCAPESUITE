@@ -12,7 +12,10 @@
   export or save. Every e2e config launches Chromium with
   `--disable-blink-features=FileSystemAccessLocal` (`apps/e2e/utils/filePickers.ts`), so specs that
   wait for a download keep getting one; `tests/regressions/ESCSUITE-470.spec.ts` stubs the pickers
-  with origin-private file system handles to test the picked-file path.
+  with origin-private file system handles to test the picked-file path. With a picker, ARTIST's
+  export buttons read "Export WebM…" rather than "Download WebM" (ESCSUITE-498), so specs select
+  them with `exportButtonName('webm' | 'mp4' | 'gif')` from `apps/e2e/utils/artist.ts`, which
+  matches either wording.
 - **E2E retries** (ESCSUITE-352): CI retries a failing test twice, except in the `chromium-strict`
   project, which runs `tests/journeys/**/*.spec.ts`, the ARTIST soaks
   (`tests/escapeartist/*soak.spec.ts`: `soak` and `import-soak`) and
@@ -124,6 +127,15 @@ decodes both; the older headless shell (build 1194) preinstalled in some cloud c
 H.264/AAC decoder, so there only the WebM can be verified (`tests/media-health/av-fixture.spec.ts`
 runs both).
 
+**Frame-barcode fixtures.** `apps/e2e/fixtures/presented-frame/` holds VP8 sources whose every
+frame shows its own index as an 8-bit barcode, at 50 fps (`frame-barcode.webm`, every frame start
+on a whole millisecond) and 30 fps (`frame-barcode-30fps.webm`, every third start rounded a third
+of a millisecond late by the WebM timecode); its README has the ffmpeg command for each.
+`apps/e2e/utils/frameBarcode.ts` cuts the imported source into pieces through `LOAD_PROJECT`
+(`cutIntoPieces`), exports a WebM at project resolution and reads each exported frame's barcode
+back (`readBarcodes`, `wrongFrames`), so a spec can check every exported frame is the source frame
+the timeline puts there (`tests/regressions/ESCSUITE-454.spec.ts`, `ESCSUITE-495.spec.ts`).
+
 **Helpers** (`apps/e2e/utils/mediaHealth.ts`):
 
 | Helper | Fails unless |
@@ -187,6 +199,26 @@ counts a worker that is gone: the decode worker is terminated when an export end
 a blob URL, an unclosed one reported by `describeGrowth`, and a terminated one gone;
 `export/decode-worker.spec.ts` checks an MP4 export made decoders in the worker (`created` grew)
 and left none open.
+
+**VP9 colour labels** (ESCSUITE-485). `export/vp9-colour-space.spec.ts` reads every VP9 key
+frame header of an ARTIST WebM export and a CRAFT WebCodecs take (`utils/webmLayout.ts` for the
+frames and the Colour element, `utils/vp9Header.ts`, a parser written from the VP9 spec rather
+than imported from `packages/shared`) and checks `color_space` against what the file should
+carry and against the Colour element's matrix. Chromium 153's encoder writes `color_space`
+itself, so each case also runs with a `VideoEncoder` wrapper clearing it to "unknown", as
+Firefox's encoder leaves it: that variant is what fails in Chromium when the app's rewrite
+(`vp9ColourSpace.ts`) breaks. Firefox runs it in the Nightly and in `e2e-cross-browser` when the
+spec changes.
+
+**Colour through the import's seek-index repair** (ESCSUITE-504).
+`regressions/ESCSUITE-504.spec.ts` imports MediaRecorder WebMs of eight drawn colour patches into
+ARTIST. Two are committed recordings, Firefox 159's VP8 and Chromium 159's VP9 with its Cues
+emptied (`fixtures/mediarecorder-colour`); the third is recorded afresh by the running browser. It
+reads the patches with a plain `<video>` and with the preview canvas, before the repair (the
+stored row put back to the original bytes, then the session restored) and after it. It fails when
+the repair changes a video packet or moves a colour by more than 2/255. The colours against the
+drawn RGB are annotations; ARTIST's `seek-index-repair-at-import.md` records them. It skips in
+WebKit, which cannot import media under Playwright.
 
 **Blind spots.** Workers started from `blob:` or `data:` URLs (the single-file builds inline theirs
 that way), workers started by a worker (Playwright does not route their script requests), shared

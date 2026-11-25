@@ -23,7 +23,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, test } from 'node:test';
 
-import { checkAppDist, isNonEmptyFile, verifyDistLayout } from './build-all.mjs';
+import { checkAppDist, isNonEmptyFile, notFoundHeadProblems, verifyDistLayout } from './build-all.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -235,6 +235,60 @@ test('verifyDistLayout: control — passes when the referenced ARTIST decode wor
   );
   writeFileSync(join(dir, 'artist', 'decodeWorker-XYZ789.js'), 'self.onmessage=()=>{}');
   assert.deepEqual(verifyDistLayout(dir), []);
+});
+
+/**
+ * ESCSUITE-489: `dist/404.html` used to be a byte-for-byte copy of the hub's
+ * `index.html`, so every dead URL was served the home page's title,
+ * description, canonical and og:url, with nothing telling search engines not
+ * to index it. The hub's build now writes `404.html` with its own head (the
+ * same writer that gives each hub route its head, ESCSUITE-458), and this
+ * script refuses to publish a `404.html` that still carries the home page's.
+ */
+const homeHead =
+  '<head><title>ESCAPE Suite — Home</title>' +
+  '<meta name="description" content="The home page." />' +
+  '<link rel="canonical" href="https://escapesuite.tech/" />' +
+  '<meta property="og:url" content="https://escapesuite.tech/" /></head>';
+const notFoundHead =
+  '<head><title>Page not found — ESCAPE Suite</title>' +
+  '<meta name="description" content="This page does not exist." />' +
+  '<meta name="robots" content="noindex" /></head>';
+
+test('notFoundHeadProblems: a copy of the home page is not a 404 page', () => {
+  assert.deepEqual(notFoundHeadProblems(homeHead, homeHead), [
+    'has the home page\'s <title>',
+    'has the home page\'s meta description',
+    'has no <meta name="robots" content="noindex">',
+    'has a rel="canonical" link',
+    'has an og:url',
+  ]);
+});
+
+test('notFoundHeadProblems: control — a not-found head passes', () => {
+  assert.deepEqual(notFoundHeadProblems(notFoundHead, homeHead), []);
+});
+
+test('notFoundHeadProblems: names each problem on its own', () => {
+  assert.deepEqual(notFoundHeadProblems(notFoundHead.replace(' name="robots" content="noindex"', ' name="robots" content="index"'), homeHead), [
+    'has no <meta name="robots" content="noindex">',
+  ]);
+  assert.deepEqual(
+    notFoundHeadProblems(notFoundHead.replace('</head>', '<meta property="og:url" content="https://escapesuite.tech/x" /></head>'), homeHead),
+    ['has an og:url']
+  );
+});
+
+test('notFoundHeadProblems: the real hub build writes 404.html with a not-found head', async () => {
+  // The writer is the hub's own (apps/plan/src/lib/routeMeta.ts), applied to the
+  // hub's index.html exactly as its build does. Node (>=22.22, package.json's
+  // engines) loads the .ts file itself by stripping its types.
+  const routeMeta = await import('../apps/plan/src/lib/routeMeta.ts');
+  const indexHtml = readFileSync(join(here, '..', 'apps', 'plan', 'index.html'), 'utf8');
+  const homeHtml = routeMeta.applyRouteHead(indexHtml, '/');
+  assert.equal(routeMeta.NOT_FOUND_HTML_FILE, '404.html');
+  assert.deepEqual(notFoundHeadProblems(routeMeta.applyNotFoundHead(indexHtml), homeHtml), []);
+  assert.match(routeMeta.applyNotFoundHead(indexHtml), /<title>Page not found — ESCAPE Suite<\/title>/);
 });
 
 /**

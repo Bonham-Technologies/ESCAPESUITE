@@ -95,6 +95,9 @@ import { croppedSourceRect, cropUpdateFor } from '../../core/clipCrop';
 import { cropCompensatesCentre, cropWriteFor } from '../../core/cropDrag';
 import { DEFAULT_SILENCE_OPTIONS, clipHasPeaks, findTakeSilences } from '../../core/silenceDetection';
 import { describeClip, relativeTimeInClip, fitToCanvasScale, maxPresetDuration } from './clipEditorModel';
+import { speedChangeLeftBehind } from '../../store/rippleRanges';
+import { leftBehindText } from '../leftBehindText';
+import type { ShowNotification } from '../../app/useNotification';
 import { useSliderGesture } from './useSliderGesture';
 import type { SliderGestureHandlers } from './useSliderGesture';
 import { useBurstGesture } from './useBurstGesture';
@@ -200,7 +203,12 @@ export interface ClipEditorActions {
   handleKeyframePanelToggle: () => void;
 }
 
-export function useClipEditorActions(): ClipEditorActions {
+/**
+ * `showNotification` is the editor's notice channel (`useNotification`): a
+ * speed change that leaves captions, overlays or markers where they were says
+ * so there (ESCSUITE-521). Optional, so a test can mount the panel on its own.
+ */
+export function useClipEditorActions(showNotification?: ShowNotification): ClipEditorActions {
   // One gesture for the whole panel: its listeners go on every slider, and every
   // write a slider can reach runs through its `commit`. Refs only — see the note
   // above, and `useSliderGesture.ts` for the rule.
@@ -258,7 +266,8 @@ export function useClipEditorActions(): ClipEditorActions {
   const setKeyframePanelOpen = useEditorStore((state) => state.setKeyframePanelOpen);
   const keyframePanelOpen = useEditorStore((state) => state.keyframePanelState.isOpen);
   // `cropClipId` is a scalar that changes only when the toggle below is
-  // pressed, so it cannot move a playback-tick render count — see constraint 5
+  // pressed or the selection moves off its clip (ESCSUITE-500), never on a
+  // playback tick, so it cannot move a playback-tick render count — see constraint 5
   // and `ClipEditor.rerender.test.tsx`.
   const cropClipId = useEditorStore((state) => state.cropClipId);
   const setCropClipId = useEditorStore((state) => state.setCropClipId);
@@ -316,9 +325,20 @@ export function useClipEditorActions(): ClipEditorActions {
   const handleUnlinkClip = isLinked ? unlinkSelected : undefined;
 
   const setClipSpeed = useEditorStore((state) => state.setClipSpeed);
+  // ESCSUITE-521: the change ripples only the clip's own rows, so whatever
+  // it leaves where it was — counted before it lands, as "Remove silences"
+  // counts before its cut — is named in one notice, in that dialog's words.
   const handleSpeedChange = useCallback(
-    (speed: number) => (selectedClip ? setClipSpeed(selectedClip.id, speed) : false),
-    [selectedClip, setClipSpeed]
+    (speed: number) => {
+      if (!selectedClip) return false;
+      const { project, markers, sourceVideos } = useEditorStore.getState();
+      const { clips, tracks } = project.timeline;
+      const left = speedChangeLeftBehind(clips, tracks, markers, sourceVideos, selectedClip.id);
+      if (!setClipSpeed(selectedClip.id, speed)) return false;
+      if (left) showNotification?.(leftBehindText(left, false, 'did not move'), 'info');
+      return true;
+    },
+    [selectedClip, setClipSpeed, showNotification]
   );
 
   // ESCSUITE-403: a take's screen part may carry no sound of its own while its

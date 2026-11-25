@@ -175,12 +175,14 @@ now-MP4-less browser still exporting, as WebM, when the Advanced button is click
 `effectiveAdvancedFormat` recomputes that same fallback, the button disables exactly when *that*
 format is blocked (with the blocking reason as its `title`), and its text reads
 `effectiveAdvancedFormat` too: a restored `{format:'mp4'}` in a browser whose H.264 probe says no
-shows an enabled "Download WebM", not an enabled "Download MP4" that silently writes a `.webm`
+shows an enabled "Download WebM" (or "Export WebM…"), not an enabled "Download MP4" that silently writes a `.webm`
 — the MP4 *radio* still stays checked and disabled with its own reason (ESCSUITE-175), since the
 ticket is about what the button under it promises to produce, not about hiding the user's saved
 choice. Since ESCSUITE-34 it is three-way, and **GIF short-circuits the fallback entirely**: a
 `'gif'` selection is its own effective format, so `advancedBlockedReason` is `null` whenever GIF
-is chosen and nothing can disable that button but an empty timeline.
+is chosen and nothing can disable that button but an empty timeline. Where the browser's save
+picker may open, every "Download {format}" here reads "Export {format}…" instead
+(ESCSUITE-498, `saving-to-a-picked-file.md`); the gating is the same.
 
 **The GIF controls (ESCSUITE-34).** GIF is a third radio under Advanced options, beside MP4 — not
 a fourth primary button: WebM stays the default and GIF is a deliberate choice, like MP4. Four
@@ -251,6 +253,22 @@ dialog adds how (`SECTION_KEYS_HINT`): close the dialog and press I and O on the
 `useAppKeyboardShortcuts` binds to set the in and out points at the playhead. The exporters' own
 message stays the bare sentence, since a headless caller has no keyboard. Regression spec:
 `apps/e2e/tests/regressions/ESCSUITE-385.spec.ts`.
+
+**A section is only the part of it on the timeline (ESCSUITE-519).** An edit that shortens the
+timeline (a clip sped up, a clip removed or rippled out) leaves the in and out points where they
+were, and the exporters fill whatever lies past the end with black and silence. So the dialog keeps
+the selected pair (`selectedRange`: the `timeRange` prop, else the ordered in/out points) apart from
+the section it exports (`timeRange`), which `sectionOnTimeline` (`Export/sectionRange.ts`) derives
+against `calculateTimelineDuration(clips)`: a section inside the timeline is unchanged; one that
+straddles the end ends at it, and "Export Section (…)", the chapters' Section choice and the export
+all use that clamped range; one that starts at or after the end has nothing to export. That last case
+is a length reason like the others: `sectionPastEndReason` ("Cannot export the section: it starts at
+0:02 and the timeline ends at 0:01. Set the in point before the end, or export the full video")
+disables "Export Section" and the Advanced download through `lengthReason`, shown on
+`export-length-reason` and tied to both by `aria-describedby`; the button keeps the selected range
+in its label, and "Export Full Video" stays enabled. `handleExport` also refuses such a section, so a
+click can never fall through to the whole timeline. Regression spec:
+`apps/e2e/tests/regressions/ESCSUITE-519.spec.ts`.
 
 **A WebM failure can offer MP4 as a retry, the mirror of MP4's own "Try WebM Instead."** MP4's
 failure has always replaced the dialog with a dedicated recovery screen (`mp4FailedError`) offering

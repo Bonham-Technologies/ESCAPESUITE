@@ -70,7 +70,19 @@ describe('SpeedSection', () => {
     await user.click(screen.getByRole('button', { name: '0.25×' }))
     expect(screen.getByRole('status').textContent).toMatch(/^Not changed/)
     await user.click(screen.getByRole('button', { name: '2×' }))
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.getByRole('status').textContent).toBe('')
+  })
+
+  // ESCSUITE-523: a screen reader announces a change to a live region already
+  // in the page, not a region inserted with its text in it.
+  it('keeps its status region in the page, empty, and fills that same region on a refusal', async () => {
+    const { user, onSpeedChange } = await renderOpen()
+    const region = screen.getByRole('status')
+    expect(region.textContent).toBe('')
+    onSpeedChange.mockReturnValueOnce(false)
+    await user.click(screen.getByRole('button', { name: '0.25×' }))
+    expect(screen.getByRole('status')).toBe(region)
+    expect(region.textContent).toMatch(/^Not changed: a clip on its row is in the way/)
   })
 
   it('asks nothing of the store, and explains nothing, for the speed the clip already has', async () => {
@@ -78,7 +90,7 @@ describe('SpeedSection', () => {
     onSpeedChange.mockReturnValue(false)
     await user.click(screen.getByRole('button', { name: '2×' }))
     expect(onSpeedChange).not.toHaveBeenCalled()
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.getByRole('status').textContent).toBe('')
   })
 
   it('does not carry a refusal over to the next clip selected', async () => {
@@ -87,7 +99,7 @@ describe('SpeedSection', () => {
     await user.click(screen.getByRole('button', { name: '0.25×' }))
     expect(screen.getByRole('status').textContent).toMatch(/^Not changed/)
     view.rerender(<SpeedSection clipId="c2" speed={1} onSpeedChange={onSpeedChange} linked={false} hasPicture />)
-    expect(screen.queryByRole('status')).toBeNull()
+    expect(screen.getByRole('status').textContent).toBe('')
   })
 
   it('freezes its controls on a locked track', async () => {

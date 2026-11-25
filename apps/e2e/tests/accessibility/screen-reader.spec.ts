@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
-import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
+import { seedTextClip, openExportDialog, openExportAdvancedOptions, exportButtonName } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
 test.describe('ARIA Live Regions', () => {
@@ -43,7 +43,7 @@ test.describe('ARIA Live Regions', () => {
     await openExportAdvancedOptions(page)
     await page.getByRole('radio', { name: /MP4/ }).check()
 
-    await page.getByRole('button', { name: 'Download MP4' }).first().click()
+    await page.getByRole('button', { name: exportButtonName('mp4') }).first().click()
 
     const dialog = page.getByRole('dialog')
     const bar = dialog.getByRole('progressbar')

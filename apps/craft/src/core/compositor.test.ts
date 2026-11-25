@@ -90,6 +90,18 @@ describe('Compositor', () => {
       expect(compositor.getCanvas().height).toBe(600)
     })
 
+    // ESCSUITE-507: a canvas with an alpha channel makes Chromium's MediaRecorder
+    // encode VP9 with an alpha layer, and Firefox converts every alpha VP9 frame
+    // as limited-range BT.601 whatever the file says (up to 35/255 off). Every
+    // frame starts with an opaque black fill, so the channel carried nothing.
+    it('asks for an opaque 2D context, so the take carries no alpha layer', () => {
+      const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
+      const compositor = new Compositor(1280, 720)
+      expect(getContext).toHaveBeenCalledTimes(1)
+      expect(getContext.mock.instances[0]).toBe(compositor.getCanvas())
+      expect(getContext).toHaveBeenCalledWith('2d', { alpha: false })
+    })
+
     it('throws when the browser gives back no 2D context', () => {
       vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null)
       expect(() => new Compositor(1280, 720)).toThrow('Failed to get 2D context')

@@ -6,6 +6,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react'
 import { ExportDialog } from './ExportDialog'
 import { resetStoreForTest, store, addClip } from '../../test/fixtures/projectStore'
+import { useEditorStore } from '../../store/projectStore'
 
 const { mockExportToWebM } = vi.hoisted(() => ({ mockExportToWebM: vi.fn() }))
 
@@ -127,6 +128,37 @@ describe('ExportDialog — Chapters row (ESCSUITE-472)', () => {
     expect(section).toBeChecked()
     fireEvent.click(row().getByRole('button', { name: 'Copy chapters' }))
     expect(writeText).toHaveBeenLastCalledWith('0:00 Intro\n0:05 Inside')
+  })
+
+  // ESCSUITE-519: a shortened timeline leaves in/out points (and markers)
+  // behind; the section's list stops at the timeline's end, as the export does.
+  it('drops markers at or past the end of the timeline from a section that straddles it', () => {
+    store().addMarker(45, 'Inside')
+    store().addMarker(60, 'At the end')
+    store().addMarker(75, 'Past the end')
+    useEditorStore.setState({ inPoint: 40, outPoint: 90 })
+    render(<ExportDialog isOpen={true} onClose={vi.fn()} />)
+
+    expect(row().getByRole('radio', { name: 'Section (0:40 - 1:00)' })).toBeChecked()
+    fireEvent.click(row().getByRole('button', { name: 'Copy chapters' }))
+    expect(writeText).toHaveBeenLastCalledWith('0:00 Intro\n0:05 Inside')
+    // Nor does a warning name a chapter the export will not hold.
+    expect(row().queryByText(/At the end|Past the end/)).toBeNull()
+
+    fireEvent.click(row().getByRole('radio', { name: 'Full video' }))
+    fireEvent.click(row().getByRole('button', { name: 'Copy chapters' }))
+    expect(writeText).toHaveBeenLastCalledWith('0:00 Intro\n0:45 Inside')
+  })
+
+  it('lists no section chapters for a section wholly past the end', () => {
+    store().addMarker(10, 'Before')
+    store().addMarker(70, 'Past the end')
+    useEditorStore.setState({ inPoint: 65, outPoint: 90 })
+    render(<ExportDialog isOpen={true} onClose={vi.fn()} />)
+
+    const copy = row().getByRole('button', { name: 'Copy chapters' })
+    expect(copy).toBeDisabled()
+    expect(document.getElementById(copy.getAttribute('aria-describedby')!)).toHaveTextContent('No markers in the section.')
   })
 
   it('keeps the row when only the full video has markers, with the copy off until Full video is picked', () => {

@@ -7,6 +7,7 @@ import {
   makeToneWav,
   keyframePanel,
   inspector,
+  exportButtonName,
 } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
@@ -22,7 +23,7 @@ test.describe('Export Dialog', () => {
   test('export dialog opens', async ({ page }) => {
     await openExportDialog(page)
 
-    await expect(page.getByRole('button', { name: 'Download WebM' }).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: exportButtonName('webm') }).first()).toBeVisible()
   })
 
   test('export format selection works', async ({ page }) => {
@@ -36,7 +37,7 @@ test.describe('Export Dialog', () => {
     await expect(mp4).toBeChecked()
 
     // Choosing a format retargets the download button
-    await expect(page.getByRole('button', { name: 'Download MP4' }).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: exportButtonName('mp4') }).first()).toBeVisible()
   })
 
   test('export quality selection available', async ({ page }) => {
@@ -66,7 +67,7 @@ test.describe('Export Dialog', () => {
   test('export progress display exists', async ({ page }) => {
     await openExportDialog(page)
 
-    await page.getByRole('button', { name: 'Download WebM' }).first().click()
+    await page.getByRole('button', { name: exportButtonName('webm') }).first().click()
 
     // Encoding reports which frame it is on, so the user can tell it is moving
     // `.first()` since ESCSUITE-215: the progress view's live region carries
@@ -445,7 +446,7 @@ test.describe('Toolbar', () => {
   })
 
   test('undo button exists', async ({ page }) => {
-    const undoButton = page.getByRole('button', { name: 'Undo (Ctrl+Z)' })
+    const undoButton = page.getByRole('button', { name: 'Undo (Control+Z)' })
     await expect(undoButton).toBeVisible()
     // Nothing to undo yet.
     await expect(undoButton).toBeDisabled()
@@ -455,12 +456,12 @@ test.describe('Toolbar', () => {
   })
 
   test('redo button exists', async ({ page }) => {
-    const redoButton = page.getByRole('button', { name: 'Redo (Ctrl+Y)' })
+    const redoButton = page.getByRole('button', { name: 'Redo (Control+Y)' })
     await expect(redoButton).toBeVisible()
     await expect(redoButton).toBeDisabled()
 
     await seedTextClip(page)
-    await page.getByRole('button', { name: 'Undo (Ctrl+Z)' }).click()
+    await page.getByRole('button', { name: 'Undo (Control+Z)' }).click()
     await expect(page.getByText(/^0 clips/)).toBeVisible()
     await expect(redoButton).toBeEnabled()
 

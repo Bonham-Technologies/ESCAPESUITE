@@ -31,6 +31,7 @@ import {
   type CropHandle,
 } from '../../core/cropDrag'
 import { getOverlayBounds } from '../Preview/previewGeometry'
+import { captionStyleFor } from '../../core/captions'
 import type { Clip, SourceVideo } from '../../store/types'
 
 /** The store actions the hook reaches for, wrapped so their arguments are visible. */
@@ -1477,5 +1478,50 @@ describe('the Zoom to region toggle (ESCSUITE-475)', () => {
 
     act(() => store().setZoomRegionClipId('some-other-clip'))
     expect(result.current.zoomToRegionOpen).toBe(false)
+  })
+})
+
+describe('handleSpeedChange: what a speed change leaves behind (ESCSUITE-521)', () => {
+  const mountWithNotice = () => {
+    const showNotification = vi.fn()
+    const hook = renderHook(() => useClipEditorActions(showNotification))
+    return { ...hook, showNotification }
+  }
+
+  /** A 4 s clip with a later one on its row, so the change ripples. */
+  function clipWithLater(): Clip {
+    const sped = addClip('sped', 0, 4)
+    addClip('later', 4, 2, sped.trackId)
+    return select(sped)
+  }
+
+  it('names the captions and markers that did not move, in one notice', () => {
+    clipWithLater()
+    store().addCaptionCues([{ start: 5, end: 6, text: 'After' }, { start: 6.5, end: 7, text: 'Later' }], captionStyleFor({ width: 1920, height: 1080 }))
+    store().addMarker(5.5, 'chapter')
+    const { result, showNotification } = mountWithNotice()
+    let applied = false
+    act(() => {
+      applied = result.current.handleSpeedChange(2)
+    })
+    expect(applied).toBe(true)
+    expect(store().project.timeline.clips.find((c) => c.id === 'later')!.timelinePosition).toBe(2)
+    expect(showNotification).toHaveBeenCalledTimes(1)
+    expect(showNotification).toHaveBeenCalledWith('2 clips on other tracks did not move: 2 captions. 1 marker did not move.', 'info')
+  })
+
+  it('says nothing when nothing was left behind, or when the change is refused', () => {
+    clipWithLater()
+    const { result, showNotification } = mountWithNotice()
+    act(() => {
+      result.current.handleSpeedChange(2)
+    })
+    store().addMarker(5, 'chapter')
+    let applied = true
+    act(() => {
+      applied = result.current.handleSpeedChange(9)
+    })
+    expect(applied).toBe(false)
+    expect(showNotification).not.toHaveBeenCalled()
   })
 })

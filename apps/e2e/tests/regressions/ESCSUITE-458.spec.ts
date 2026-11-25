@@ -11,7 +11,7 @@ import { waitForAppReady } from '../../utils/ready'
  * is the same head the page sets once it is running.
  */
 const HUB = 'http://localhost:5173'
-const ORIGIN = 'https://www.escapesuite.io'
+const ORIGIN = 'https://escapesuite.tech'
 
 function decodeEntities(text: string): string {
   return text.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')

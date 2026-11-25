@@ -719,6 +719,31 @@ describe('exportToMP4 rendering', () => {
     expect(media.seeks).toEqual([0, 1, 2, 3, 4, 5].map((i) => elementSeekTarget(2 + (i * 2) / 30)))
   })
 
+  // ESCSUITE-508: an import outside Chromium is stored at a placeholder 30 fps
+  // (`frameRateSource: 'assumed'`). Judged on that grid, a 0.25x clip of a
+  // 50 fps file skipped seeks to its next frame; with no rate to stand behind,
+  // the export seeks every request the element does not already sit at.
+  const slowed = [makeClip({ startTime: 2, duration: CLIP_DURATION, endTime: 2 + CLIP_DURATION * 0.25, speed: 0.25 })]
+
+  it.each([
+    ['assumed', 'assumed' as const],
+    ['absent', undefined],
+  ])('seeks a slowed clip on every frame when the source rate is %s (ESCSUITE-508)', async (_label, frameRateSource) => {
+    await run({ clips: slowed, sources: [makeSourceVideo({ width: 640, height: 360, frameRate: 30, frameRateSource })] })
+
+    expect(media.seeks).toEqual([0, 1, 2, 3, 4, 5].map((i) => elementSeekTarget(2 + i / 120)))
+  })
+
+  it.each(['measured', 'configured'] as const)(
+    'still skips the seeks a slowed clip of a %s rate needs none for (ESCSUITE-505)',
+    async (frameRateSource) => {
+      await run({ clips: slowed, sources: [makeSourceVideo({ width: 640, height: 360, frameRate: 30, frameRateSource })] })
+
+      // Only the requests on a new 30 fps frame (or over half a frame away) seek.
+      expect(media.seeks).toEqual([0, 3, 4].map((i) => elementSeekTarget(2 + i / 120)))
+    }
+  )
+
   it('draws an image source without a frame source', async () => {
     await storeSource('image1', 'image/png')
     const sources = [makeSourceVideo({ id: 'image1', mediaType: 'image' })]
@@ -1208,6 +1233,58 @@ describe('exportToMP4 failure handling', () => {
     expect(error.frameIndex).toBe(6)
     expect(error.exportLog[0]).toMatchObject({ phase: 'init' })
     expect(webcodecs.videoEncoders[0].state).toBe('closed')
+  })
+
+  // ESCSUITE-499, as on the WebM side: nobody awaits an `output:` callback,
+  // so a packet the muxer refuses must fail the export, not reject into the
+  // page. (The WebM side's other case, a write still in flight when Cancel
+  // closes the stream, has no MP4 twin: this exporter never cancels its Output.)
+  it('fails the export with the muxer\'s refusal of an audio packet, before finalizing (ESCSUITE-499)', async () => {
+    getMediabunnyState().addError = new Error('Audio parameters must remain constant')
+    getMediabunnyState().addErrorKind = 'audio'
+    mixAudio.mockResolvedValue(audioFor(0.2))
+
+    const failure = await run().catch((e: unknown) => e)
+
+    expect(failure).toBeInstanceOf(ExportError)
+    expect((failure as ExportError).message).toContain('Audio parameters must remain constant')
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
+  })
+
+  it('fails the export with the muxer\'s refusal of a packet still being added at the flush, instead of reporting success (ESCSUITE-499)', async () => {
+    // The pre-finalize check cannot see a packet whose add() is still in the
+    // muxer when it runs (a real encoder's flush() does not wait for its
+    // callbacks). Hold the last frame's add past that check, then refuse it.
+    let release = () => {}
+    const failure = await run({
+      onProgress: (p) => {
+        if (p.message?.startsWith('Encoding frame 5/')) {
+          getMediabunnyState().addGate = new Promise<void>((resolve) => (release = resolve))
+        }
+        if (p.phase === 'muxing') {
+          getMediabunnyState().addError = new Error('Timestamps must be monotonically increasing')
+          release()
+        }
+      },
+    }).catch((e: unknown) => e)
+
+    expect(failure).toBeInstanceOf(ExportError)
+    expect((failure as ExportError).message).toContain('Timestamps must be monotonically increasing')
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(1)
+  })
+
+  it('fails the export with the muxer\'s refusal of a packet, instead of an unhandled rejection (ESCSUITE-499)', async () => {
+    // At the next frame, as an encoder error is: not first at the flush, which
+    // the real VideoEncoder resolves without waiting for its callbacks.
+    getMediabunnyState().addError = new Error('Video sample size must remain constant')
+
+    const failure = await run().catch((e: unknown) => e)
+
+    expect(failure).toBeInstanceOf(ExportError)
+    expect((failure as ExportError).message).toContain('Video sample size must remain constant')
+    expect(webcodecs.videoEncoders[0].encodes.length).toBeLessThan(6)
+    expect(webcodecs.videoEncoders[0].flushes).toBe(0)
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
   })
 })
 

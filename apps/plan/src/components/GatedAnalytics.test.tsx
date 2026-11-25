@@ -47,9 +47,9 @@ describe('GatedAnalytics', () => {
     expect(
       (beforeSend as BeforeSend)({
         type: 'event',
-        url: 'https://www.escapesuite.io/?video=https%3A%2F%2Fh.example%2Fv.mp4&title=secret&project=eyJ9#x',
+        url: 'https://escapesuite.tech/?video=https%3A%2F%2Fh.example%2Fv.mp4&title=secret&project=eyJ9#x',
       })
-    ).toEqual({ type: 'event', url: 'https://www.escapesuite.io/' })
+    ).toEqual({ type: 'event', url: 'https://escapesuite.tech/' })
   })
 
   it('mounts nothing in standalone build mode', async () => {

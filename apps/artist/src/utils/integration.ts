@@ -528,7 +528,7 @@ export function generateShareUrl(
  *   frames the app also controls this URL and would simply supply its own
  *   origin. Refusing to be framed is
  *   `Content-Security-Policy: frame-ancestors` on the deployment. The hosted deployment
- *   (escapesuite.io) sends `frame-ancestors 'self'` from vercel.json; self-hosted builds
+ *   (escapesuite.tech) sends `frame-ancestors 'self'` from vercel.json; self-hosted builds
  *   must set their own.
  * - tabKey=<name> - The host's name for this frame (ESCSUITE-332). A host that
  *   frames MORE THAN ONE editor in a page should pass a different one to each:

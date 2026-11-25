@@ -1,60 +1,15 @@
+// Setup for the suites that run in jsdom (every suite not listed in
+// nodeTestSuites.ts). The `node` project loads only ./setupGlobals.
+//
 // Install real fake-indexeddb BEFORE any other setup, so storage modules that
 // open IndexedDB on import resolve against the working in-memory implementation
 // rather than a non-functional stub. Must be a static import so it is hoisted
 // before any vi.stubGlobal calls below.
 import 'fake-indexeddb/auto'
-import { Blob as NodeBlob } from 'node:buffer'
+// The DOM setup every app shares (jest-dom matchers, Testing Library cleanup,
+// matchMedia, ResizeObserver). It needs `window`, so the node project skips it.
 import '@escapesuite/shared/test/setup'
-import { vi } from 'vitest'
-
-// jsdom's Blob is not structured-clone-serialisable in the way Node.js's
-// structuredClone expects (size/type are lost on round-trip through
-// fake-indexeddb). Replace with Node.js's native Blob so IndexedDB storage
-// tests that assert blob.size / blob.type work correctly.
-vi.stubGlobal('Blob', NodeBlob)
-
-// Mock localStorage (jsdom provides one but it can be overwritten by other mocks)
-const localStorageStore: Record<string, string> = {}
-vi.stubGlobal('localStorage', {
-  getItem: vi.fn((key: string) => localStorageStore[key] ?? null),
-  setItem: vi.fn((key: string, value: string) => { localStorageStore[key] = value }),
-  removeItem: vi.fn((key: string) => { delete localStorageStore[key] }),
-  clear: vi.fn(() => { Object.keys(localStorageStore).forEach(k => delete localStorageStore[k]) }),
-  get length() { return Object.keys(localStorageStore).length },
-  key: vi.fn((index: number) => Object.keys(localStorageStore)[index] ?? null),
-})
-
-// Mock URL.createObjectURL and revokeObjectURL
-// Keep URL constructor functional but mock the static methods.
-// Every call mints a DISTINCT handle: a stub that returned one literal for
-// every call made a revoke of a previous test's leaked URL indistinguishable
-// from a revoke of the current test's, so tests could not tell "freed the
-// handle it was given" from "freed some handle".
-const OriginalURL = globalThis.URL
-let objectUrlSerial = 0
-vi.stubGlobal('URL', class extends OriginalURL {
-  static createObjectURL = vi.fn(() => `blob:mock-url-${++objectUrlSerial}`)
-  static revokeObjectURL = vi.fn()
-})
-
-// Mock AudioContext for audio tests
-vi.stubGlobal('AudioContext', class AudioContext {
-  createBufferSource = vi.fn(() => ({
-    connect: vi.fn(),
-    start: vi.fn(),
-    stop: vi.fn(),
-  }))
-  createGain = vi.fn(() => ({
-    connect: vi.fn(),
-    gain: { value: 1 },
-  }))
-  decodeAudioData = vi.fn()
-  close = vi.fn()
-  destination = {}
-})
-
-// Mock OfflineAudioContext
-vi.stubGlobal('OfflineAudioContext', class OfflineAudioContext {
-  decodeAudioData = vi.fn()
-  startRendering = vi.fn()
-})
+// ARTIST's own globals, installed after the shared setup so its localStorage
+// stub replaces the shared one, as it always has. The Blob, URL, localStorage
+// and AudioContext stubs that test comments credit to "setup.ts" live there.
+import './setupGlobals'

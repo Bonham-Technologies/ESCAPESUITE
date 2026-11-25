@@ -1,11 +1,16 @@
 /**
  * A WebM's video blocks, Clusters and Cues, read in Node from its bytes
- * (ESCSUITE-417). Enough to ask the two questions a seekable ESCAPECRAFT take
+ * (ESCSUITE-417), and its video track's codec and Colour matrix with each
+ * frame's bytes (ESCSUITE-485). Enough to ask the two questions a seekable ESCAPECRAFT take
  * has to answer yes to: does every video frame have a timecode of its own, and
  * does every key frame open its Cluster's video with a cue pointing at it?
  *
- * SimpleBlocks only, which is everything Mediabunny writes; Clusters of known
- * size or of unknown size (a Cluster then runs until the next one starts).
+ * Frames in SimpleBlocks and in BlockGroups (ESCSUITE-494): Mediabunny writes
+ * SimpleBlocks, except the last frame of each track in a Cluster, which it
+ * puts in a BlockGroup so it can carry a BlockDuration. A BlockGroup's Block has
+ * no keyframe flag; it is a key frame when the group has no ReferenceBlock.
+ * Clusters of known size or of unknown size (a Cluster then runs until the
+ * next one starts).
  */
 
 const SEGMENT = 0x18538067
@@ -21,15 +26,25 @@ export interface VideoBlock {
   cluster: number
   /** Whether it is the first video block of its Cluster. */
   firstInCluster: boolean
+  /** The frame itself: the block's payload, a view into the file's bytes. */
+  data: Uint8Array
+  /** Whether it carries BlockAdditions, which is how WebM stores a VP9 or VP8 alpha layer (ESCSUITE-507). */
+  alpha: boolean
 }
 
 export interface WebmLayout {
   videoTrack: number
+  /** The video track's CodecID, such as `V_VP9`. */
+  videoCodec: string
+  /** Its Colour element's MatrixCoefficients (ISO/IEC 23091-4: 1 BT.709, 5 BT.470BG, 6 SMPTE 170M), or null without one. */
+  videoMatrixCoefficients: number | null
   videoBlocks: VideoBlock[]
   /** Each Cluster's offset from the Segment's data, as a CueClusterPosition counts it. */
   clusterPositions: number[]
   /** Every CuePoint's track positions: its time, track and Cluster. */
   cues: Array<{ time: number; track: number; clusterPosition: number }>
+  /** Where the Cues element lies in the file, header included, or null without one (ESCSUITE-504). */
+  cuesElement: { start: number; end: number } | null
 }
 
 export function readWebmLayout(bytes: Uint8Array): WebmLayout {
@@ -67,7 +82,15 @@ export function readWebmLayout(bytes: Uint8Array): WebmLayout {
 
   const segment = element(element(0).end)
   if (segment.id !== SEGMENT) throw new Error('Not a WebM: no Segment after the EBML header')
-  const layout: WebmLayout = { videoTrack: 0, videoBlocks: [], clusterPositions: [], cues: [] }
+  const layout: WebmLayout = {
+    videoTrack: 0,
+    videoCodec: '',
+    videoMatrixCoefficients: null,
+    videoBlocks: [],
+    clusterPositions: [],
+    cues: [],
+    cuesElement: null,
+  }
 
   for (let at = segment.dataStart; at < bytes.length; ) {
     const e = element(at)
@@ -76,9 +99,19 @@ export function readWebmLayout(bytes: Uint8Array): WebmLayout {
         const fields = children(entry)
         const number = fields.find((f) => f.id === 0xd7)
         const type = fields.find((f) => f.id === 0x83)
-        if (number && type && uint(type) === 1) layout.videoTrack = uint(number)
+        if (number && type && uint(type) === 1) {
+          layout.videoTrack = uint(number)
+          const codec = fields.find((f) => f.id === 0x86)
+          if (codec) layout.videoCodec = new TextDecoder().decode(bytes.subarray(codec.dataStart, codec.end))
+          // Video > Colour > MatrixCoefficients
+          const video = fields.find((f) => f.id === 0xe0)
+          const colour = video && children(video).find((f) => f.id === 0x55b0)
+          const matrix = colour && children(colour).find((f) => f.id === 0x55b1)
+          if (matrix) layout.videoMatrixCoefficients = uint(matrix)
+        }
       }
     } else if (e.id === CUES) {
+      layout.cuesElement = { start: e.start, end: e.end }
       for (const point of children(e)) {
         const fields = children(point)
         const time = uint(fields.find((f) => f.id === 0xb3)!)
@@ -97,18 +130,33 @@ export function readWebmLayout(bytes: Uint8Array): WebmLayout {
         const child = element(i)
         if (child.id === CLUSTER) break
         if (child.id === 0xe7) timecode = uint(child)
+        // A SimpleBlock, or a BlockGroup's Block (0xa1) with its ReferenceBlocks (0xfb).
+        let block: ReturnType<typeof element> | undefined
+        let key = false
+        let alpha = false
         if (child.id === 0xa3) {
-          const length = vintLength(bytes[child.dataStart])
-          let track = bytes[child.dataStart] & (0xff >> length)
-          for (let k = 1; k < length; k++) track = track * 256 + bytes[child.dataStart + k]
-          const head = child.dataStart + length
+          block = child
+        } else if (child.id === 0xa0) {
+          const fields = children(child)
+          block = fields.find((f) => f.id === 0xa1)
+          key = !fields.some((f) => f.id === 0xfb)
+          alpha = fields.some((f) => f.id === 0x75a1)
+        }
+        if (block) {
+          const length = vintLength(bytes[block.dataStart])
+          let track = bytes[block.dataStart] & (0xff >> length)
+          for (let k = 1; k < length; k++) track = track * 256 + bytes[block.dataStart + k]
+          const head = block.dataStart + length
           const relative = (((bytes[head] << 8) | bytes[head + 1]) << 16) >> 16
           if (track === layout.videoTrack) {
             layout.videoBlocks.push({
               time: timecode + relative,
-              key: (bytes[head + 2] & 0x80) !== 0,
+              key: block === child ? (bytes[head + 2] & 0x80) !== 0 : key,
               cluster,
               firstInCluster: !sawVideo,
+              // After the timecode and the flags byte; Mediabunny never laces.
+              data: bytes.subarray(head + 3, block.end),
+              alpha,
             })
             sawVideo = true
           }

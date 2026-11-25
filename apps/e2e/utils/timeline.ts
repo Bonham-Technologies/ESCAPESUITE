@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { Browser, BrowserContext, Locator, Page, expect } from '@playwright/test'
-import { ARTIST_URL } from './artist'
+import { ARTIST_URL, exportButtonName } from './artist'
 import { waitForAppReady } from './ready'
 
 /**
@@ -149,7 +149,7 @@ export async function reopenProject(
 /** Export the timeline as WebM through the export dialog and return the file's bytes. */
 export async function exportWebM(page: Page): Promise<Buffer> {
   await page.getByRole('button', { name: 'Export video' }).click()
-  const downloadWebM = page.getByRole('button', { name: /download webm/i }).first()
+  const downloadWebM = page.getByRole('button', { name: exportButtonName('webm') }).first()
   await expect(downloadWebM).toBeVisible({ timeout: 15_000 })
   const downloadPromise = page.waitForEvent('download', { timeout: 120_000 })
   await downloadWebM.click()

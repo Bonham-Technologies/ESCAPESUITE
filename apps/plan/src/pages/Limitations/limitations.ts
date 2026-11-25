@@ -200,7 +200,7 @@ export const LIMITATIONS: Limitation[] = [
     id: 'hosted-offline',
     title: 'The hosted site works offline after the first visit, app by app',
     body: [
-      'On www.escapesuite.io, each app works offline after the first visit. Open the hub, ESCAPECRAFT or ESCAPEARTIST once while you are online and let it finish loading; after that, it opens and works with no connection, recording, editing and exporting included. Each app is saved on its own, so open each one you want while you are online.',
+      'On escapesuite.tech, each app works offline after the first visit. Open the hub, ESCAPECRAFT or ESCAPEARTIST once while you are online and let it finish loading; after that, it opens and works with no connection, recording, editing and exporting included. Each app is saved on its own, so open each one you want while you are online.',
       'It needs a browser with service workers, which current versions of Chrome, Edge, Firefox and Safari have. A private window may not keep the saved copy, or may not allow it at all. The browser may also discard the saved copy, for example when the device runs low on space, or in Safari after about seven days without a visit; open the app online again to save it again.',
       'The saved copy is the app itself. Your recordings, imported files and projects are stored in the browser as before, not by this feature. When a new version is published, the app saves it the next time you open it online, and shows a short “Updated” note.',
       'An app shown inside another page (in an iframe) does not save itself for offline use. The offline build from the Releases page needs no first visit at all.',
@@ -211,11 +211,11 @@ export const LIMITATIONS: Limitation[] = [
     id: 'hosted-analytics',
     title: 'What the hosted site sends',
     body: [
-      'The hosted site (www.escapesuite.io) uses Vercel Web Analytics. Our code sends two kinds of record: a page view when a page opens, and a named event when you do certain things, such as “Recording Started”, “Export Completed” or “Tool Launched”.',
+      'The hosted site (escapesuite.tech) uses Vercel Web Analytics. Our code sends two kinds of record: a page view when a page opens, and a named event when you do certain things, such as “Recording Started”, “Export Completed” or “Tool Launched”.',
       'Every record includes the path of the page you are on, such as /artist/, and never the part of the address after a ? or #. If you came from another site, or another site shows the app inside its own page, the record also includes that site’s address. Browsers normally shorten it to just the site’s name, such as https://example.com/, unless that site asks for more. Vercel also works out your browser, operating system, device type and approximate location (down to the city) from the request itself.',
       'An event adds at most a few short labels and numbers: which tool, which export format, a length in whole seconds, a media type (video, image or audio), and for a failed export its error type and how far it got. Nothing you record, import, type or export is sent, and neither are file names.',
       'A website that embeds ESCAPECRAFT or ESCAPEARTIST in its own page can put its own address, a video’s address, a title, a whole project or a window name into the app’s address after a ?. None of that is sent, and neither is the random ID ESCAPECRAFT adds when it hands a recording to ESCAPEARTIST.',
-      'Both kinds of record go to /_vercel/insights/ on www.escapesuite.io itself, not to another site. Our code sets no cookies.',
+      'Both kinds of record go to /_vercel/insights/ on escapesuite.tech itself, not to another site. Our code sets no cookies.',
       'The offline build contains no analytics code at all, and makes no network requests. Its built-in lockdown refuses any server address the page tries to load, a video address given to ESCAPEARTIST included (see “Offline file: what its lockdown does not cover”).',
     ],
     sources: [

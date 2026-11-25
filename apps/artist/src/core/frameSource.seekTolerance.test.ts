@@ -87,17 +87,47 @@ describe('HTMLVideoFrameSource seek tolerance (ESCSUITE-263)', () => {
     expect(el.seeks).toEqual([elementSeekTarget(2)]);
   });
 
-  it('uses the 30 fps fallback when the rate is unknown', async () => {
-    const near = sourceFor(undefined);
-    await near.source.getFrame(2);
-    await near.source.getFrame(2 + 0.4 / 30);
-    expect(near.el.seeks).toHaveLength(1);
-
-    const far = sourceFor(0);
-    await far.source.getFrame(2);
-    await far.source.getFrame(2 + 0.6 / 30);
-    expect(far.el.seeks).toHaveLength(2);
+  // ESCSUITE-505: half a frame is a window around where the element sits, not
+  // the frame it shows. A slowed clip's requests are closer together than a
+  // source frame, and one just past a frame start, from an element sitting just
+  // before it, is inside the window but on the next frame.
+  it('seeks for a request on the next frame even when it is closer than half a frame', async () => {
+    const { el, source } = sourceFor(60);
+    await source.getFrame(2 + 0.7 / 60); // frame 120, the element 1 ms past it
+    await source.getFrame(2 + 1.1 / 60); // frame 121, 0.4 frames from the request before
+    expect(el.seeks).toEqual([2 + 0.7 / 60, 2 + 1.1 / 60].map(elementSeekTarget));
   });
+
+  // ESCSUITE-508: a rate nobody measured (an import outside Chromium is stored
+  // at a placeholder 30, `frameRateSource: 'assumed'`, and the MP4 exporter
+  // hands such a source no rate) has no grid to judge by. A slowed clip of a
+  // 50 fps file asks for times closer together than a 30 fps frame, so the
+  // placeholder grid skipped seeks to the next real frame. Without a rate the
+  // seek is skipped only when the element already sits at the request.
+  it.each([undefined, 0, -30, NaN, Infinity])(
+    'seeks every new request when the rate is %s, however close (ESCSUITE-508)',
+    async (rate) => {
+      const { el, source } = sourceFor(rate)
+      await source.getFrame(2)
+      await source.getFrame(2 + 0.25 / 30) // 0.25x in a 30 fps export: 8.3 ms on, the same 30 fps frame
+      await source.getFrame(2 + 0.5 / 30)
+      expect(el.seeks).toEqual([2, 2 + 0.25 / 30, 2 + 0.5 / 30].map(elementSeekTarget))
+    }
+  )
+
+  it('skips a request the element already sits at when the rate is unknown', async () => {
+    const { el, source } = sourceFor(undefined)
+    await source.getFrame(0) // a fresh element already sits at the first frame
+    await source.getFrame(2)
+    await source.getFrame(2) // the same time again: a transition's outgoing side
+    expect(el.seeks).toEqual([elementSeekTarget(2)])
+  })
+
+  it('still judges a known rate on its grid: a 0.25x clip of a 30 fps source seeks only for new frames', async () => {
+    const { el, source } = sourceFor(30)
+    for (let i = 0; i < 6; i++) await source.getFrame(2 + i / 120)
+    expect(el.seeks).toEqual([0, 3, 4].map((i) => elementSeekTarget(2 + i / 120)))
+  })
 
   it('is handed the rate by the factory', async () => {
     const el = makeElement();

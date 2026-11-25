@@ -1136,6 +1136,24 @@ describe('ExportDialog', () => {
       expect(onClose).toHaveBeenCalledTimes(1)
     })
 
+    // ESCSUITE-502: the auto-close timer used to outlive the dialog. Fired
+    // after unmount, it called onClose for a dialog that was gone and, once
+    // the test environment was torn down, threw from setProgress.
+    it('does not auto-close after it has been unmounted', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      const { unmount } = render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+      await settle()
+      expect(screen.getByText('Export complete!')).toBeInTheDocument()
+
+      unmount()
+      expect(vi.getTimerCount()).toBe(0)
+      expect(() => vi.advanceTimersByTime(2000)).not.toThrow()
+
+      expect(onClose).not.toHaveBeenCalled()
+    })
+
     it('disables both export buttons for an empty timeline', () => {
       store().removeClipFromTimeline('clip1')
       render(<ExportDialog isOpen={true} onClose={onClose} />)
@@ -2388,6 +2406,78 @@ describe('ExportDialog', () => {
 
       expect(screen.getByRole('button', { name: /download webm/i })).toBeInTheDocument()
       expect(screen.queryByRole('button', { name: /Export Section/ })).not.toBeInTheDocument()
+    })
+
+    // ESCSUITE-519: an edit that shortens the timeline (a clip sped up, one
+    // removed) leaves the in and out points where they were. The section
+    // offered was the raw pair, so a click exported seconds of black and
+    // silence and still said "Export complete!".
+    describe('a section past the end of the timeline (ESCSUITE-519)', () => {
+      const PAST_END =
+        'Cannot export the section: it starts at 0:06 and the timeline ends at 0:05. Set the in point before the end, or export the full video'
+      const describedBy = (element: HTMLElement) =>
+        (element.getAttribute('aria-describedby') ?? '')
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((id) => document.getElementById(id)?.textContent ?? '')
+          .join(' ')
+
+      it('cannot export a section wholly past the end, and says why in text tied to the button', async () => {
+        // The store's setters are what a shortened timeline leaves behind:
+        // the points stay where they were set.
+        useEditorStore.setState({ inPoint: 6, outPoint: 8 })
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+        const section = screen.getByRole('button', { name: /Export Section/ })
+        expect(section).toBeDisabled()
+        expect(section).toHaveAttribute('title', PAST_END)
+        expect(describedBy(section)).toContain(PAST_END)
+        expect(screen.getByText(`${PAST_END}.`)).toBeVisible()
+
+        // The whole timeline still exports, and with no line of its own.
+        const full = screen.getByRole('button', { name: 'Export Full Video' })
+        expect(full).toBeEnabled()
+        expect(full).not.toHaveAttribute('aria-describedby')
+
+        // The Advanced download exports the section too, so it is off as well.
+        fireEvent.click(advancedToggle())
+        const advanced = advancedExport()
+        expect(advanced).toBeDisabled()
+        expect(describedBy(advanced)).toContain(PAST_END)
+        fireEvent.click(advanced)
+        fireEvent.click(section)
+        await Promise.resolve()
+        expect(mockExportToWebM).not.toHaveBeenCalled()
+      })
+
+      it('refuses a section that starts exactly at the end', () => {
+        useEditorStore.setState({ inPoint: 5, outPoint: 8 })
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+        expect(screen.getByRole('button', { name: /Export Section/ })).toBeDisabled()
+      })
+
+      it('clamps a section that straddles the end, and the button says the clamped range', async () => {
+        useEditorStore.setState({ inPoint: 1, outPoint: 8 })
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+        const section = screen.getByRole('button', { name: 'Export Section (0:01 - 0:05)' })
+        expect(section).toBeEnabled()
+        expect(section).not.toHaveAttribute('aria-describedby')
+        fireEvent.click(section)
+
+        await waitFor(() => expect(mockExportToWebM).toHaveBeenCalledTimes(1))
+        expect(webmArgs()[2].timeRange).toEqual({ start: 1, end: 5 })
+      })
+
+      it('clamps an explicit time range prop the same way', async () => {
+        render(<ExportDialog isOpen={true} onClose={onClose} timeRange={{ start: 2, end: 9 }} />)
+
+        fireEvent.click(screen.getByRole('button', { name: 'Export Section (0:02 - 0:05)' }))
+
+        await waitFor(() => expect(mockExportToWebM).toHaveBeenCalledTimes(1))
+        expect(webmArgs()[2].timeRange).toEqual({ start: 2, end: 5 })
+      })
     })
   })
 

@@ -1,14 +1,20 @@
 import { render } from '@testing-library/react'
 import {
+  NOT_FOUND_HTML_FILE,
+  NOT_FOUND_META,
   ROUTE_META,
   ROUTE_PATHS,
   SITE_URL,
+  STRUCTURED_DATA_OPERATING_SYSTEM,
+  SUPPORTED_BROWSERS,
+  applyNotFoundHead,
   applyRouteHead,
   hubPathFor,
   routeHtmlFile,
 } from './routeMeta'
 import { useRouteSeo } from './seo'
 import indexHtml from '../../index.html?raw'
+import readme from '../../../../README.md?raw'
 
 /**
  * ESCSUITE-458: the hosting served every hub route the one `index.html`, whose
@@ -30,6 +36,7 @@ function headOf(html: string) {
     ogUrl: content('meta[property="og:url"]'),
     twitterTitle: content('meta[name="twitter:title"]'),
     twitterDescription: content('meta[name="twitter:description"]'),
+    robots: content('meta[name="robots"]'),
   }
 }
 
@@ -65,6 +72,7 @@ describe('applyRouteHead', () => {
       ogUrl: url,
       twitterTitle: title,
       twitterDescription: description,
+      robots: undefined,
     })
   })
 
@@ -72,7 +80,7 @@ describe('applyRouteHead', () => {
     const out = applyRouteHead(indexHtml, '/privacy')
     const body = (html: string) => html.slice(html.indexOf('<body>'))
     expect(body(out)).toBe(body(indexHtml))
-    expect(out).toContain('<meta property="og:image" content="https://www.escapesuite.io/og.png" />')
+    expect(out).toContain('<meta property="og:image" content="https://escapesuite.tech/og.png" />')
   })
 
   it('escapes HTML in the values it writes', () => {
@@ -82,12 +90,15 @@ describe('applyRouteHead', () => {
   })
 
   it('leaves out social tags the page does not have', () => {
+    const jsonLd = (os: string) => `<script type="application/ld+json">{"operatingSystem":"${os}"}</script>`
     const minimal =
-      '<head><title>x</title><meta name="description" content="x" /><link rel="canonical" href="x" /></head>'
+      '<head><title>x</title><meta name="description" content="x" /><link rel="canonical" href="x" />' +
+      `${jsonLd('x')}</head>`
     expect(applyRouteHead(minimal, '/terms')).toBe(
       '<head><title>Terms of Service — ESCAPE Suite</title>' +
         `<meta name="description" content="${ROUTE_META['/terms'].description}" />` +
-        '<link rel="canonical" href="https://www.escapesuite.io/terms" /></head>'
+        '<link rel="canonical" href="https://escapesuite.tech/terms" />' +
+        `${jsonLd(STRUCTURED_DATA_OPERATING_SYSTEM)}</head>`
     )
   })
 
@@ -95,10 +106,119 @@ describe('applyRouteHead', () => {
     ['<title>', /<title>[\s\S]*?<\/title>/],
     ['meta description', /<meta name="description"[^>]*>/],
     ['canonical link', /<link rel="canonical"[^>]*>/],
+    ['JSON-LD operatingSystem', /"operatingSystem"[^\n]*\n/],
   ])('fails, naming it, when index.html has no %s', (name, pattern) => {
     expect(() => applyRouteHead(indexHtml.replace(pattern, ''), '/privacy')).toThrow(
       `applyRouteHead: index.html has no ${name}`
     )
+  })
+})
+
+/**
+ * ESCSUITE-465: the JSON-LD on every hub page said `"operatingSystem": "Web
+ * (Chrome, Edge)"`, though the README's "Browser support" section lists Firefox
+ * 155+ and Safari 26.6+ as well. The expected value is read from that README
+ * sentence, so the structured data and the README cannot drift apart.
+ */
+function readmeBrowsers(): string[] {
+  const sentence = /requires the WebCodecs API, which (.+?) all provide/.exec(readme)
+  if (!sentence) throw new Error('README.md "Browser support" no longer names the browsers that export video')
+  return sentence[1].split(/, | and /)
+}
+
+function jsonLdOf(html: string): Record<string, unknown>[] {
+  return [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].map(
+    (m) => JSON.parse(m[1]) as Record<string, unknown>
+  )
+}
+
+describe('structured data (ESCSUITE-465)', () => {
+  const operatingSystem = `Web (${readmeBrowsers().join(', ')})`
+
+  it('reads the browsers from the README', () => {
+    expect(readmeBrowsers()).toEqual(['Chrome', 'Edge', 'Firefox 155+', 'Safari 26.6+'])
+  })
+
+  it('names the README’s browsers in one constant', () => {
+    expect(SUPPORTED_BROWSERS).toEqual(readmeBrowsers())
+    expect(STRUCTURED_DATA_OPERATING_SYSTEM).toBe(operatingSystem)
+  })
+
+  it.each(ROUTE_PATHS)('%s serves one valid JSON-LD block naming those browsers', (path) => {
+    const blocks = jsonLdOf(applyRouteHead(indexHtml, path))
+    expect(blocks).toHaveLength(1)
+    const [data] = blocks
+    expect(data).toMatchObject({
+      '@context': 'https://schema.org',
+      '@type': 'SoftwareApplication',
+      name: 'ESCAPE Suite',
+      applicationCategory: 'MultimediaApplication',
+      url: 'https://escapesuite.tech/',
+      isAccessibleForFree: true,
+      offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+    })
+    expect(data.operatingSystem).toBe(operatingSystem)
+  })
+
+  it('sets the value in a JSON-LD block written on one line', () => {
+    const html = '<title>x</title><meta name="description" content="x" /><link rel="canonical" href="x" />'
+    const jsonLd = '<script type="application/ld+json">{ "operatingSystem": "old" }</script>'
+    const [data] = jsonLdOf(applyRouteHead(html + jsonLd, '/'))
+    expect(data.operatingSystem).toBe(STRUCTURED_DATA_OPERATING_SYSTEM)
+  })
+})
+
+/**
+ * ESCSUITE-489: the hosted site's `404.html` was a byte-for-byte copy of the
+ * home page, so a dead URL was served the home page's title, description,
+ * canonical and og:url, and nothing told search engines not to index it.
+ */
+describe('applyNotFoundHead (ESCSUITE-489)', () => {
+  it('is written to 404.html, the file the hosting serves with status 404', () => {
+    expect(NOT_FOUND_HTML_FILE).toBe('404.html')
+  })
+
+  it('has a not-found title and a description of its own, in the lengths search results show', () => {
+    expect(NOT_FOUND_META.title).toBe('Page not found — ESCAPE Suite')
+    expect(NOT_FOUND_META.title.length).toBeLessThanOrEqual(60)
+    expect(NOT_FOUND_META.description.length).toBeGreaterThanOrEqual(50)
+    expect(NOT_FOUND_META.description.length).toBeLessThanOrEqual(160)
+    expect(Object.values(ROUTE_META).map((m) => m.description)).not.toContain(NOT_FOUND_META.description)
+  })
+
+  it('writes the not-found head: noindex, and no canonical or og:url', () => {
+    const { title, description } = NOT_FOUND_META
+    expect(headOf(applyNotFoundHead(indexHtml))).toEqual({
+      title,
+      description,
+      canonicals: [],
+      ogTitle: title,
+      ogDescription: description,
+      ogUrl: undefined,
+      twitterTitle: title,
+      twitterDescription: description,
+      robots: 'noindex',
+    })
+  })
+
+  it('changes nothing outside the head tags it sets', () => {
+    const out = applyNotFoundHead(indexHtml)
+    const body = (html: string) => html.slice(html.indexOf('<body>'))
+    expect(body(out)).toBe(body(indexHtml))
+    expect(out).toContain('<meta property="og:image" content="https://escapesuite.tech/og.png" />')
+    expect(out).not.toMatch(/\n\s*\n\s*<meta name="theme-color"/)
+  })
+
+  it('writes one robots tag when the page already has one', () => {
+    const once = applyNotFoundHead(indexHtml)
+    expect(applyNotFoundHead(once)).toBe(once)
+  })
+
+  it.each([
+    ['<title>', /<title>[\s\S]*?<\/title>/],
+    ['meta description', /<meta name="description"[^>]*>/],
+  ])('fails, naming it, when index.html has no %s', (name, pattern) => {
+    expect(() => applyNotFoundHead(indexHtml.replace(pattern, ''))).toThrow(`applyNotFoundHead: index.html has no ${name}`)
   })
 })
 

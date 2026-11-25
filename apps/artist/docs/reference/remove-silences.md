@@ -22,6 +22,11 @@ the list already filled from the defaults:
 | Minimum gap (s) | 0.7 | Shorter pauses are never cut |
 | Padding (s) | 0.1 | Kept on each side of every cut, so a word is not clipped at its edge |
 
+The fields take −100 to 0 dBFS, 0.1 to 60 s and 0 to 5 s. The minimum gap's
+floor is 0.1 s (ESCSUITE-487): peaks are 10 ms each, so a gap of 0 matched
+every quiet bucket, and on an hour-long recording could list, and cut, tens of
+thousands of 10 ms pauses.
+
 Each opening starts over (ESCSUITE-463): the fields read these defaults, the
 settings the list was found with, **Move everything after each cut** is on and
 no row is active, whatever a cancelled session typed. App mounts the dialog
@@ -33,8 +38,10 @@ Changing a setting finds the pauses again. When every clip it would listen to
 is on a muted or hidden track (below), the summary says so ("No audible sound
 to judge: every track with sound here is muted or hidden.") instead of "No
 pauses to cut". A field that does not hold a number
-in range is marked `aria-invalid` with a hint, and the list stays as it was
-until every field reads. Each listed pause has a **Keep** button
+in range is marked `aria-invalid` with a hint ("Enter a number from 0.1 to
+60."), and the list stays as it was until every field reads; **Remove all** is
+disabled meanwhile, since the list is then not what the fields say
+(ESCSUITE-487). Each listed pause has a **Keep** button
 (`Keep the pause at m:ss.cc`) that drops it from the list. Keep moves focus to
 the next row's Keep, else the previous row's, else Cancel, since the pressed
 button goes with its row (ESCSUITE-441); the status line gives the new count.
@@ -65,8 +72,40 @@ stack (`components/Timeline/TimelineSilenceBands.tsx`, decorative; the list is
 the accessible form). **Move everything after each cut** (a checkbox, on each
 time the dialog opens, ESCSUITE-434) decides whether the rest of the timeline
 moves with the cut (below); its hint, its `aria-describedby`, says which.
-The summary adds "This removes 90 % or more of <clip name>." when the cuts total 90 % or more of the clip (ESCSUITE-449). A locked row in the take (`cutHeldByLock` in `store/rippleRanges.ts`, the check `removeTimeRanges` refuses on) is named by an alert as the dialog opens, and **Remove all** is disabled (ESCSUITE-449). **Remove all** cuts what is listed and closes the dialog with a notice;
+The summary adds "This removes 90 % or more of <clip name>." when the cuts total 90 % or more of the clip (ESCSUITE-449). A locked row in the take (`cutHeldByLock` in `store/rippleRanges.ts`, the check `removeTimeRanges` refuses on) is named by an alert as the dialog opens, and **Remove all** is disabled (ESCSUITE-449). **Remove all** cuts every pause found and closes the dialog with a notice;
 **Cancel** and Escape cut nothing.
+
+### Many pauses (ESCSUITE-487)
+
+Each row is three buttons and the list is not virtualised, so above
+`LISTED_PAUSES` (500) the list draws a page of 500 rows at a time and the
+summary says so: "3600 pauses found · 2160.00 s will be cut. The list shows
+the first 500 of 3600; Remove all cuts all 3600." A **Show 500 more pauses**
+button under the list (the remaining count on the last page, "Show 100 more
+pauses") draws the next page and moves focus to the first row it drew (that
+row's Go to), so every pause can still be gone to, played or kept; the button
+goes once every pause is listed. The page count starts over at 500 whenever
+the pauses are found again (a field changes) and on each opening. The cap is
+display only: **Remove all** cuts every pause found, as one undo step, and
+Keep on a listed row brings the next one up into the list. The timeline still draws every pause, but pauses less than
+a pixel apart at the current zoom are drawn as one band, since the gap between
+them cannot be seen. Zoomed in far enough that every gap is a pixel or more
+(a 10 ms gap is a pixel at 100 px/s, zoom 2×), each pause is still a band of
+its own.
+
+Measured in the unit-test environment (vitest + jsdom on a shared 4-CPU
+container; the dialog and the timeline bands at 50 px/s mounted; each step
+one change event timed from dispatch to the end of React's render) on an hour
+of synthetic peaks (360,000 at 10 ms), before and after this change:
+
+| Source and settings | Before | After |
+|---|---|---|
+| 1 silent, 1 loud bucket; padding 0, Minimum gap typed as 0 | 180,000 pauses listed: the test worker ran out of memory rendering them | 0 refused as invalid, nothing found again: 2 ms |
+| 10 silent, 1 loud bucket; padding 0, Minimum gap 0.1 (the worst the floor allows: 32,727 pauses) | that keystroke 16.6 s, the next one 6.5 s | 500 rows, merged bands: 0.34 s, the next one 0.20 s |
+| 0.8 s silent each second; the defaults (3,600 pauses) | opening 1.6 s, a keystroke 0.8 s | opening 0.56 s, a keystroke 0.20 s |
+
+Detection alone over the 360,000 peaks takes 5–30 ms (about 110 ms for the
+180,000-pause case); the rest is rendering.
 
 The dialog is a modal like the others in [`dialogs.md`](dialogs.md):
 `useDialogBehaviour`, `role="dialog"`, `aria-modal`, labelled by its `<h2>`,
@@ -292,7 +331,9 @@ tracks will not move: 1 blur, 1 media clip. 1 marker will not move. They may
 fall out of step with the take." The sentence is the dialog's accessible
 description (`aria-describedby`), and the notice after **Remove all** repeats
 the count ("… did not move"). Nothing is shown, and the dialog has no
-description, when nothing is left behind.
+description, when nothing is left behind. The sentence is `leftBehindText`
+(`components/leftBehindText.ts`), which a clip's speed change also uses for
+its own notice (ESCSUITE-521, [`clip-speed.md`](clip-speed.md)).
 
 ## Tests
 
@@ -358,6 +399,18 @@ description, when nothing is left behind.
   system audio (captured 1.5 s late) covers the microphone's pause; nothing is
   found until its row is muted, then the pause is, and Remove all cuts all
   three rows in step.
+- `src/components/SilenceDialog.test.tsx` (ESCSUITE-487): 0, 0.05 and −1 s
+  refused with the hint and Remove all disabled, 0.1 s accepted; Remove all
+  disabled while any field does not read; ten minutes of choppy talk lists
+  500 of its 600 pauses, says so, offers "Show 100 more pauses", draws every
+  band, and Remove all (after a Keep) cuts all 599; no cap note or button at
+  exactly 500; 1,100 pauses shown 500 more then the last 100, focus on the
+  first new row's Go to each time, and Keep on a pause past the 1,000th; the
+  page count back to 500 after a field change and after reopening; bands less than a pixel apart
+  merged at 50 px/s and not at 500 px/s.
+- `apps/e2e/tests/regressions/ESCSUITE-487.spec.ts`: 0 typed into Minimum gap
+  is marked invalid with the hint, the list is not found again and Remove all
+  is disabled; 0.1 is accepted and finds the short pause too.
 - `apps/e2e/tests/regressions/ESCSUITE-482.spec.ts`: the take's screen part
   given a Wipe Left; after Remove all the inspector's Transition Out shows
   None on the piece before the cut and Wipe Left on the last piece, and one

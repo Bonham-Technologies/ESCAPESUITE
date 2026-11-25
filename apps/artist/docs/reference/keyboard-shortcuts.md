@@ -36,10 +36,24 @@ if a single-key row outside the Keyframe Graph group is in neither, and the hook
 `BOUND_SINGLE_KEYS` entry is claimed. The sheet once listed J/K/L playback keys and a loop toggle that
 never existed. The same rule covers chords (ESCSUITE-269): `BOUND_CHORDS` (the hook) lists every
 Ctrl/Cmd chord the cascade binds, redo's Shift spelling as its own entry; the sheet test fails on a
-`Ctrl` row outside it and `FileMenu.test.tsx` fails on a menu hint outside it, and the hook's test proves
+Ctrl/⌘ row outside it and `FileMenu.test.tsx` fails on a menu hint outside it, and the hook's test proves
 each entry is claimed. The sheet and the menu once showed `Ctrl+N` for New Project, which nothing bound and
 which Chromium/Edge keep for a new window (a page cannot claim it), so both lost it; the menu item keeps its
 label and shows no hint. Add a chord to the table when you bind one, and never one the browser reserves.
+
+**Hints name the platform's modifier (ESCSUITE-491).** Every chord answers Ctrl *or* Cmd
+(`e.ctrlKey || e.metaKey`), so no hint says "Ctrl" on its own: `utils/shortcutKeys.ts` reads the platform
+(`navigator.userAgentData.platform`, then `navigator.platform`, then the user agent; an iPad reports itself as a
+Mac, which is the answer wanted) and spells a chord `⌘Z` on Apple platforms and `Ctrl+Z` elsewhere
+(`chordLabel`). What a screen reader reads spells the key out, `Command+Z` / `Control+Z` (`chordSpoken`): the
+sheet hides its drawn keys (`aria-hidden`) beside a `.visually-hidden` spelled-out chord, the File menu does the
+same inside each item's name, and the toolbar's Undo / Redo take it as their `aria-label`. The header's Save /
+Export, the inspector's Duplicate, Remove silences' "⌘Z puts them back" and the delete-track question use
+`chordLabel`. The sheet's rows write the modifier as `MOD`; the sheet and the File menu take an optional
+`platform` prop for tests, and everything else reads `currentShortcutPlatform()` at render. Use these helpers
+for any new hint, never a literal "Ctrl". A chord whose ⌘ form macOS or the browser keeps (⌘H, ⌘M, ⌘Q, ⌘W, ⌘N,
+⌘T never reach the page) is shown with Control on a Mac instead, `⌃M` / `Control+M`, since Control does reach
+it: Go to Previous Marker is the one bound today, as ⌘M minimises the window.
 
 **The sheet's colours meet AA in both themes.** The group headings use `--accent-text`, the accent
 as text: `#4a9eff` (= `--accent-primary`) in the dark theme and `#155fb8` in the light one, where

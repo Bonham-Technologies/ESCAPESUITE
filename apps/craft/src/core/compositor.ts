@@ -65,7 +65,11 @@ export class Compositor {
       this.canvas.height = height;
     }
 
-    const ctx = this.canvas.getContext('2d');
+    // Opaque (ESCSUITE-507): every frame starts with a black fill, so an alpha
+    // channel carries nothing, but Chromium's MediaRecorder encodes one as a VP9
+    // alpha layer, and Firefox converts every frame of an alpha VP9 file as
+    // limited-range BT.601, whatever the file says (up to 35/255 off).
+    const ctx = this.canvas.getContext('2d', { alpha: false });
     if (!ctx) {
       throw new Error('Failed to get 2D context');
     }
