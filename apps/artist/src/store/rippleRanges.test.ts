@@ -494,6 +494,15 @@ describe('speedChangeLeftBehind (ESCSUITE-521)', () => {
     expect(leftBySpeed('sped')).toEqual({ blur: 0, captions: 1, textOrShapes: 0, media: 0, markers: 1, linkedToLocked: 0 })
   })
 
+  it('counts only what lies over the take when nothing after it moves', () => {
+    const { screen } = placeTake()
+    // Nothing follows the take on its rows, so a caption and a marker after it
+    // still line up with everything around them; the one over it does not.
+    store().addCaptionCues([{ start: 4, end: 5, text: 'During' }, { start: 12, end: 13, text: 'After' }], style)
+    store().addMarker(11, 'chapter')
+    expect(leftBySpeed(screen.id)).toEqual({ blur: 0, captions: 1, textOrShapes: 0, media: 0, markers: 0, linkedToLocked: 0 })
+  })
+
   it('is null when nothing is left behind, and for a clip not on the timeline', () => {
     const { screen } = placeTake()
     store().addClipToTimeline({ id: 'later', sourceVideoId: video.id, name: 'later', startTime: 0, endTime: 3, duration: 3 }, screen.trackId, 10)

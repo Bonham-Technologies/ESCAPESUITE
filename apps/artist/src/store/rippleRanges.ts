@@ -25,6 +25,7 @@ import { cloneClip } from '../utils/deepClone';
 import { trimAnimation, KEYFRAME_TIME_EPSILON } from '../utils/animation';
 import { isExtendableClip } from './extendableClip';
 import { sourceTimeAt, speedGroup } from './clipSpeed';
+import { startsAtOrAfter } from './timelineSnapping';
 
 /**
  * A piece shorter than this is not kept (a millisecond, the tolerance a split
@@ -157,10 +158,13 @@ export function leftBehind(
  * What a speed change of `clipId` leaves where it is (ESCSUITE-521), counted
  * as a cut's is (`leftBehind`, without "Move everything"): `setClipSpeed`
  * retimes the clip and its linked parts from the group's start and ripples the
- * rows a link reaches from them (`linkedRows`), so every clip on another row
- * that overlaps or follows the group's start, and every marker at or after it,
- * no longer lines up with what it was placed on. Null when nothing is left
- * behind, or the clip is not on the timeline.
+ * clips after the group on the rows a link reaches from them (`linkedRows`).
+ * Every clip on another row over the group, and every marker in it, no longer
+ * lines up with the retimed footage; when the ripple moves a later clip, so
+ * does every clip on another row after the group, and every later marker.
+ * When nothing after the group moves, what lies after it still lines up with
+ * everything around it and is not counted. Null when nothing is left behind,
+ * or the clip is not on the timeline.
  */
 export function speedChangeLeftBehind(
   clips: readonly Clip[],
@@ -174,7 +178,21 @@ export function speedChangeLeftBehind(
   const group = speedGroup(clips, clip, sourceVideos);
   const start = Math.min(...group.map((c) => c.timelinePosition));
   const end = Math.max(...group.map((c) => c.timelinePosition + c.duration));
-  return leftBehind(clips, tracks, markers, clipId, [{ start, end }], false);
+  const rows = linkedRows(clips, clip);
+  const inGroup = new Set(group.map((c) => c.id));
+  // What `setClipSpeed` ripples: a clip after the group on one of its rows.
+  const movesLater = clips.some((c) => !inGroup.has(c.id) && rows.has(c.trackId) && startsAtOrAfter(c, end));
+  if (movesLater) return leftBehind(clips, tracks, markers, clipId, [{ start, end }], false);
+  // A clip on another row is never on a linked row, so dropping it leaves
+  // `linkedRows` as it was.
+  return leftBehind(
+    clips.filter((c) => rows.has(c.trackId) || c.timelinePosition < end),
+    tracks,
+    markers.filter((m) => m.time < end),
+    clipId,
+    [{ start, end }],
+    false
+  );
 }
 
 /** How much of `ranges` lies before `time`. */

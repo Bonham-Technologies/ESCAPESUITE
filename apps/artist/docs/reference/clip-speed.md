@@ -60,9 +60,11 @@ caption and chapter marker would be out of step. A speed change set from the
 inspector names what it left behind in one notice (the editor's status toast,
 `role="status"`), in **Remove silences'** words: for example "1 clip on other
 tracks did not move: 1 caption. 1 marker did not move." It counts, before the
-change lands, every clip on a row the change does not move that overlaps or
-follows the start of the clip and its linked parts, by kind, and every marker
-at or after that start (`speedChangeLeftBehind` in `store/rippleRanges.ts`,
+change lands, every clip on a row the change does not move that overlaps the
+clip and its linked parts, by kind, and every marker over them, now out of
+step with the retimed footage; when the ripple moves a later clip, also every
+such clip and marker after them. When nothing after the clip moves, what lies
+after it still lines up and is not counted (`speedChangeLeftBehind` in `store/rippleRanges.ts`,
 which runs **Remove silences'** `leftBehind` over the group's span; the group
 is `speedGroup` in `clipSpeed.ts`, the clips `setClipSpeed` changes). The
 sentence is `leftBehindText` (`components/leftBehindText.ts`), shared with
