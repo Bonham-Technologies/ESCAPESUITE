@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v40. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v42. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: registry and repo runs (background: bonham-ops `docs/ops/one-project.md`)
 
 ## Registry
