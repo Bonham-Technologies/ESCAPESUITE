@@ -28,7 +28,10 @@ Out, collapsed until opened) offers 0.25×, 0.5×, 1×, 1.5×, 2× and 4×, plus
 field for any speed in the range (committed on Enter or blur and clamped to
 the range, `useCommittedNumberInput`). The section header and the clip on the
 timeline (`2.5s · 2×`) show a speed other than 1×. One line says what happens to
-the sound, and one says why when the store refuses a change.
+the sound, and one says why when the store refuses a change. That last line is
+a `role="status"` region kept in the page, empty, while the section is open, and
+filled on a refusal, so a screen reader announces it (ESCSUITE-523); it empties
+when a change lands, for the speed the clip already has, or on another clip.
 
 `setClipSpeed(clipId, speed)` is one undo step and:
 

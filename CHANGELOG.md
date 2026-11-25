@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- ESCAPEARTIST: when the clip inspector's Speed section can't change a clip's speed, screen readers now announce why, because the line that says so is filled in a status region already in the page instead of appearing with its text in it (ESCSUITE-523).
 - ESCAPEARTIST: changing a clip's speed now says, in one notice, which captions, overlays and markers on other tracks it left where they were, in Remove silences' words (for example "1 clip on other tracks did not move: 1 caption. 1 marker did not move."); there is no notice when nothing was left behind (ESCSUITE-521).
 - Release notes: the pending notes for the next release name one address, escapesuite.tech; the note that announced escapesuite.io is gone (escapesuite.tech's note already says old escapesuite.io links forward), and the offline note now says to open the apps on escapesuite.tech (ESCSUITE-520).
 - ESCAPEARTIST: "Export Section" stops at the end of the timeline. When an edit that shortens the timeline (speeding a clip up, for one) leaves the in or out point past the new end, a section that runs past the end exports only up to it and its button shows that range, and a section that starts after the end can no longer be exported, with a line saying why tied to the disabled button; it used to export seconds of black with no sound and say "Export complete!". The YouTube chapter list leaves out markers past the end too (ESCSUITE-519).
