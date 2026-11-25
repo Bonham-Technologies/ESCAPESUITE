@@ -2,10 +2,10 @@
 // out of a take's rows and closing every gap, as one undo step, with the
 // take's parts kept in step.
 import { describe, it, expect, beforeEach } from 'vitest'
-import { resetStoreForTest, store, video } from '../test/fixtures/projectStore'
+import { addClip, resetStoreForTest, store, video } from '../test/fixtures/projectStore'
 import { audioSource } from '../test/renderPreview'
 import { captionStyleFor } from '../core/captions'
-import { cutEditorBlock, leftBehind, normaliseRanges } from './rippleRanges'
+import { cutEditorBlock, leftBehind, normaliseRanges, speedChangeLeftBehind } from './rippleRanges'
 import { scrubRemovedSources } from './storeHistory'
 import { useEditorStore } from './projectStore'
 import type { Clip } from './types'
@@ -466,6 +466,39 @@ describe('leftBehind (ESCSUITE-431)', () => {
     expect(leftBehind(clips, tracks, [], 'missing', [{ start: 1, end: 2 }], false)).toBeNull()
     expect(leftBehind(clips, tracks, [], screen.id, [], false)).toBeNull()
     expect(leftBehind(clips, tracks, [], mic.id, [{ start: 1, end: 2 }], false)).toBeNull()
+  })
+})
+
+describe('speedChangeLeftBehind (ESCSUITE-521)', () => {
+  const style = captionStyleFor({ width: 1920, height: 1080 })
+  const leftBySpeed = (clipId: string) => {
+    const { project, markers, sourceVideos } = store()
+    return speedChangeLeftBehind(project.timeline.clips, project.timeline.tracks, markers, sourceVideos, clipId)
+  }
+
+  it('counts the captions, overlays and markers from the take on, on rows the speed change does not move', () => {
+    const { screen } = placeTake()
+    // A later clip on the take's row: the ripple moves it, so it is not counted.
+    store().addClipToTimeline({ id: 'later', sourceVideoId: video.id, name: 'later', startTime: 0, endTime: 3, duration: 3 }, screen.trackId, 10)
+    store().addCaptionCues([{ start: 4, end: 5, text: 'During' }, { start: 12, end: 13, text: 'After' }], style)
+    store().addMarker(11, 'chapter')
+    expect(leftBySpeed(screen.id)).toEqual({ blur: 0, captions: 2, textOrShapes: 0, media: 0, markers: 1, linkedToLocked: 0 })
+  })
+
+  it('leaves out what ends before the take starts', () => {
+    const first = addClip('first', 0, 4)
+    addClip('sped', 6, 4, first.trackId)
+    store().addCaptionCues([{ start: 1, end: 2, text: 'Before' }, { start: 7, end: 8, text: 'Over it' }], style)
+    store().addMarker(3, 'before')
+    store().addMarker(6, 'at its start')
+    expect(leftBySpeed('sped')).toEqual({ blur: 0, captions: 1, textOrShapes: 0, media: 0, markers: 1, linkedToLocked: 0 })
+  })
+
+  it('is null when nothing is left behind, and for a clip not on the timeline', () => {
+    const { screen } = placeTake()
+    store().addClipToTimeline({ id: 'later', sourceVideoId: video.id, name: 'later', startTime: 0, endTime: 3, duration: 3 }, screen.trackId, 10)
+    expect(leftBySpeed(screen.id)).toBeNull()
+    expect(leftBySpeed('missing')).toBeNull()
   })
 })
 

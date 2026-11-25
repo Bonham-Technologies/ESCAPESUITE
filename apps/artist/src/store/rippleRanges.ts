@@ -24,7 +24,7 @@ import type { TimeRange } from '../core/silenceDetection';
 import { cloneClip } from '../utils/deepClone';
 import { trimAnimation, KEYFRAME_TIME_EPSILON } from '../utils/animation';
 import { isExtendableClip } from './extendableClip';
-import { sourceTimeAt } from './clipSpeed';
+import { sourceTimeAt, speedGroup } from './clipSpeed';
 
 /**
  * A piece shorter than this is not kept (a millisecond, the tolerance a split
@@ -151,6 +151,30 @@ export function leftBehind(
   }
   if (!moveEverything) counts.markers = markers.filter((m) => m.time >= first.start).length;
   return Object.values(counts).some((n) => n > 0) ? counts : null;
+}
+
+/**
+ * What a speed change of `clipId` leaves where it is (ESCSUITE-521), counted
+ * as a cut's is (`leftBehind`, without "Move everything"): `setClipSpeed`
+ * retimes the clip and its linked parts from the group's start and ripples the
+ * rows a link reaches from them (`linkedRows`), so every clip on another row
+ * that overlaps or follows the group's start, and every marker at or after it,
+ * no longer lines up with what it was placed on. Null when nothing is left
+ * behind, or the clip is not on the timeline.
+ */
+export function speedChangeLeftBehind(
+  clips: readonly Clip[],
+  tracks: readonly Track[],
+  markers: readonly Marker[],
+  sourceVideos: readonly Pick<SourceVideo, 'id' | 'mediaType'>[],
+  clipId: string
+): LeftBehind | null {
+  const clip = clips.find((c) => c.id === clipId);
+  if (!clip) return null;
+  const group = speedGroup(clips, clip, sourceVideos);
+  const start = Math.min(...group.map((c) => c.timelinePosition));
+  const end = Math.max(...group.map((c) => c.timelinePosition + c.duration));
+  return leftBehind(clips, tracks, markers, clipId, [{ start, end }], false);
 }
 
 /** How much of `ranges` lies before `time`. */
