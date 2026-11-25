@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v40. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v43. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: fleet role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -110,7 +110,7 @@ statusCategory != Done`.
 ### Fleet digest
 
 A comment on this project's steward log, found as **Weekly digest** says. **Waiting on
-you** comes first, then **Decided this week**, then **Missed runs**, then one section per lane in `bin/fleet lanes`
+you** comes first, then **Decided this week**, then **Missed runs**, then **Unreviewed pushes**, then one section per lane in `bin/fleet lanes`
 order, headed by its title (**Products**, **Sites and brand**, **Platform**,
 **Prototypes**), then **Policy findings filed this run**, linked, or "none".
 
@@ -136,6 +136,9 @@ order, headed by its title (**Products**, **Sites and brand**, **Platform**,
   or scout whose later run says "caught up <date>" for that due day is listed as "caught
   up <date>", not missed, and doesn't count toward "a missed run in two consecutive weeks"
   (**Policy tickets**) unless it caught up two weeks running.
+
+- **Unreviewed pushes** (BORG-141): each `autopilot` repo's PRs merged in the last 7 days (`gh api 'repos/<repo>/pulls?state=closed&sort=updated&direction=desc&per_page=100'`, attached as input 6), except refresh PRs (head `autopilot/refresh-v*`) and PRs opened before the repo's `main` took policy v43 (a repo still below v43 gets one line, "no markers before v43"), with a commit (by `commit.committer.date`) dated after the PR's `created_at` (`gh api 'repos/<repo>/pulls/{n}/commits'`) other than one by `dependabot[bot]` or a merge whose second parent is on `main` (`compare/<that sha>...main` status `ahead` or `identical`: an update-branch merge),
+  where no owner comment (`issues/{n}/comments`) names the last such commit, or a later one, as `Head:` under a first line `<!-- autopilot:re-reviewed -->` (on a Dependabot PR, `<!-- autopilot:dependabot-triage -->` with a `Review:` line); each linked, or "none". Each one also goes under **Waiting on you**.
 
 **Products**, the `autopilot` products. Setup, Capacity and the control panel list only
 `autopilot` repos: an `on-request` or `tracked` repo gets no panel row; its level is its switch.
