@@ -133,7 +133,15 @@ export function findScripts(html) {
  * the one the browser computes and the offline file would open blank.
  */
 export function assertScriptBoundaries(html) {
-  const rest = html.replace(SCRIPT_RE, '')
+  // The HTML between the elements found, joined. This is only searched, never
+  // written out, so it is not a sanitiser: a leftover `<script` is the error.
+  let rest = ''
+  let last = 0
+  for (const match of html.matchAll(SCRIPT_RE)) {
+    rest += html.slice(last, match.index)
+    last = match.index + match[0].length
+  }
+  rest += html.slice(last)
   const stray = /<\/?script\b/i.exec(rest)
   if (stray) {
     throw new Error(
