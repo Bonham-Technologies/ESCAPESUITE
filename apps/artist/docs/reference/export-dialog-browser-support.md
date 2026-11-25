@@ -254,6 +254,22 @@ dialog adds how (`SECTION_KEYS_HINT`): close the dialog and press I and O on the
 message stays the bare sentence, since a headless caller has no keyboard. Regression spec:
 `apps/e2e/tests/regressions/ESCSUITE-385.spec.ts`.
 
+**A section is only the part of it on the timeline (ESCSUITE-519).** An edit that shortens the
+timeline (a clip sped up, a clip removed or rippled out) leaves the in and out points where they
+were, and the exporters fill whatever lies past the end with black and silence. So the dialog keeps
+the selected pair (`selectedRange`: the `timeRange` prop, else the ordered in/out points) apart from
+the section it exports (`timeRange`), which `sectionOnTimeline` (`Export/sectionRange.ts`) derives
+against `calculateTimelineDuration(clips)`: a section inside the timeline is unchanged; one that
+straddles the end ends at it, and "Export Section (…)", the chapters' Section choice and the export
+all use that clamped range; one that starts at or after the end has nothing to export. That last case
+is a length reason like the others: `sectionPastEndReason` ("Cannot export the section: it starts at
+0:02 and the timeline ends at 0:01. Set the in point before the end, or export the full video")
+disables "Export Section" and the Advanced download through `lengthReason`, shown on
+`export-length-reason` and tied to both by `aria-describedby`; the button keeps the selected range
+in its label, and "Export Full Video" stays enabled. `handleExport` also refuses such a section, so a
+click can never fall through to the whole timeline. Regression spec:
+`apps/e2e/tests/regressions/ESCSUITE-519.spec.ts`.
+
 **A WebM failure can offer MP4 as a retry, the mirror of MP4's own "Try WebM Instead."** MP4's
 failure has always replaced the dialog with a dedicated recovery screen (`mp4FailedError`) offering
 WebM as the alternative, regardless of what kind of error it was — gated on `webmSupported`
