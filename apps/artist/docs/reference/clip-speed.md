@@ -128,9 +128,14 @@ types); nothing the app writes produces one.
 `src/components/ClipEditor/useClipEditorActions.test.ts` (the notice),
 `src/core/audioMixer.speed.test.ts` (resampling, A/V sync at 0.5×, 1.5× and
 2×, silence above 2×), `src/components/ClipEditor/SpeedSection.test.tsx`, and
-the Playwright spec `apps/e2e/tests/regressions/ESCSUITE-471.spec.ts` (2× from
+the Playwright specs `apps/e2e/tests/regressions/ESCSUITE-471.spec.ts` (2× from
 the inspector on the A/V fixture, a WebM export 2.5 s long with its silence and
-its pictures where the source's land at 2×), and
+its pictures where the source's land at 2×),
 `apps/e2e/tests/regressions/ESCSUITE-521.spec.ts` (a caption and a marker
 after a clip set to 2× named in one status notice, none when nothing is left
-behind, and Ctrl+Z restoring the clips).
+behind, and Ctrl+Z restoring the clips), and
+`apps/e2e/tests/escapeartist/clip-speed-editing.spec.ts` (ESCSUITE-522: a 2×
+clip split at the playhead, trimmed by its end handle, every step undone and
+redone, saved and reopened in a fresh browser, each length read off the
+timeline; a linked screen and microphone take at 0.5×, its microphone's
+offset scaled and both rows cut at the same time).
