@@ -13,9 +13,15 @@ import { TransitionSection } from './TransitionSection';
 import { SpeedSection } from './SpeedSection';
 import { clipSpeed } from '../../store/clipSpeed';
 import { ActionsSection } from './ActionsSection';
+import type { ShowNotification } from '../../app/useNotification';
 import styles from './ClipEditor.module.css';
 
-export function ClipEditor() {
+interface ClipEditorProps {
+  /** The editor's notice channel, for what a speed change leaves behind (ESCSUITE-521). */
+  showNotification?: ShowNotification;
+}
+
+export function ClipEditor({ showNotification }: ClipEditorProps = {}) {
   const {
     selectedClip,
     scaleLocked,
@@ -68,7 +74,7 @@ export function ClipEditor() {
     handleAddShape,
     handleResetToDefaults,
     handleKeyframePanelToggle,
-  } = useClipEditorActions();
+  } = useClipEditorActions(showNotification);
 
   // No clip selected - show add overlay options
   if (!selectedClip) {

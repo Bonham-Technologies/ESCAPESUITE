@@ -11,7 +11,8 @@ import {
   type SilenceOptions,
   type TimeRange,
 } from '../core/silenceDetection';
-import { cutHeldByLock, leftBehind, type LeftBehind } from '../store/rippleRanges';
+import { cutHeldByLock, leftBehind } from '../store/rippleRanges';
+import { count, leftBehindText } from './leftBehindText';
 import { chordLabel, currentShortcutPlatform } from '../utils/shortcutKeys';
 import styles from './SilenceDialog.module.css';
 
@@ -39,8 +40,6 @@ function clock(t: number): string {
   const minutes = Math.floor(ms / 60_000);
   return `${minutes}:${((ms % 60_000) / 1000).toFixed(2).padStart(5, '0')}`;
 }
-
-const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /**
  * How many pauses the list draws at a time (ESCSUITE-487). Each row is three
@@ -119,32 +118,6 @@ function pausePlayer() {
       if (letGo()) useEditorStore.getState().setIsPlaying(false);
     },
   };
-}
-
-/**
- * What the cut leaves where it is, in words (ESCSUITE-431): the clips by kind,
- * then the markers. `verb` is "will not move" in the dialog, "did not move" in
- * the notice.
- */
-function leftBehindText(left: LeftBehind, moveEverything: boolean, verb: string): string {
-  const kinds = [
-    count(left.blur, 'blur', 'blurs'),
-    count(left.captions, 'caption', 'captions'),
-    count(left.textOrShapes, 'text or shape', 'texts or shapes'),
-    count(left.media, 'media clip', 'media clips'),
-  ].filter((k) => !k.startsWith('0 '));
-  const clips = left.blur + left.captions + left.textOrShapes + left.media;
-  // With the box on only a lock holds a clip back: its own track's, or that of
-  // a clip it is linked to.
-  const where = !moveEverything
-    ? 'on other tracks'
-    : `on ${clips === 1 ? 'a locked track' : 'locked tracks'}${left.linkedToLocked > 0 ? ' or linked to one' : ''}`;
-  const sentences: string[] = [];
-  if (clips > 0) {
-    sentences.push(`${count(clips, 'clip', 'clips')} ${where} ${verb}: ${kinds.join(', ')}.`);
-  }
-  if (left.markers > 0) sentences.push(`${count(left.markers, 'marker', 'markers')} ${verb}.`);
-  return sentences.join(' ');
 }
 
 /**

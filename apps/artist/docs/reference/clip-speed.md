@@ -28,7 +28,10 @@ Out, collapsed until opened) offers 0.25×, 0.5×, 1×, 1.5×, 2× and 4×, plus
 field for any speed in the range (committed on Enter or blur and clamped to
 the range, `useCommittedNumberInput`). The section header and the clip on the
 timeline (`2.5s · 2×`) show a speed other than 1×. One line says what happens to
-the sound, and one says why when the store refuses a change.
+the sound, and one says why when the store refuses a change. That last line is
+a `role="status"` region kept in the page, empty, while the section is open, and
+filled on a refusal, so a screen reader announces it (ESCSUITE-523); it empties
+when a change lands, for the speed the clip already has, or on another clip.
 
 `setClipSpeed(clipId, speed)` is one undo step and:
 
@@ -44,13 +47,33 @@ the sound, and one says why when the store refuses a change.
   rows and every row a link reaches from them (`linkedRows`, the rows a cut
   moves together), so a later take stays in step even with a part (a camera)
   on a row this take never reaches. Other rows, markers and in/out points do
-  not move;
+  not move (the inspector says so, below);
 - refuses (`false`, nothing written) a speed outside the range, the speed the
   clips already have, an overlay or image, a clip or linked part on a locked
   track, a clip it would move on a locked track, and a change that would run a
   part or a moved clip into a clip it does not move (one that sits between a
   part's end and the group's end on that row): a slow-down's longer part, or a
   speed-up's later clips pulled back over it.
+
+### What a speed change leaves behind (ESCSUITE-521)
+
+Captions, overlays and markers on other rows stay where they were, so after
+transcribing a recording and speeding up its waiting parts, every later
+caption and chapter marker would be out of step. A speed change set from the
+inspector names what it left behind in one notice (the editor's status toast,
+`role="status"`), in **Remove silences'** words: for example "1 clip on other
+tracks did not move: 1 caption. 1 marker did not move." It counts, before the
+change lands, every clip on a row the change does not move that overlaps the
+clip and its linked parts, by kind, and every marker over them, now out of
+step with the retimed footage; when the ripple moves a later clip, also every
+such clip and marker after them. When nothing after the clip moves, what lies
+after it still lines up and is not counted (`speedChangeLeftBehind` in `store/rippleRanges.ts`,
+which runs **Remove silences'** `leftBehind` over the group's span; the group
+is `speedGroup` in `clipSpeed.ts`, the clips `setClipSpeed` changes). The
+sentence is `leftBehindText` (`components/leftBehindText.ts`), shared with
+**Remove silences**. There is no notice when nothing is left behind, or when
+the store refuses the change. In/out points are not counted (as in **Remove
+silences**). Undo is unchanged: one Ctrl+Z puts the clips back.
 
 ## Playback and export
 
@@ -101,11 +124,16 @@ types); nothing the app writes produces one.
 ## Tests
 
 `src/store/clipSpeed.test.ts` (model, store action, edits, project file),
+`src/store/rippleRanges.test.ts` (`speedChangeLeftBehind`, ESCSUITE-521),
+`src/components/ClipEditor/useClipEditorActions.test.ts` (the notice),
 `src/core/audioMixer.speed.test.ts` (resampling, A/V sync at 0.5×, 1.5× and
 2×, silence above 2×), `src/components/ClipEditor/SpeedSection.test.tsx`, and
-the Playwright spec `apps/e2e/tests/regressions/ESCSUITE-471.spec.ts` (2× from
+the Playwright specs `apps/e2e/tests/regressions/ESCSUITE-471.spec.ts` (2× from
 the inspector on the A/V fixture, a WebM export 2.5 s long with its silence and
-its pictures where the source's land at 2×), and
+its pictures where the source's land at 2×),
+`apps/e2e/tests/regressions/ESCSUITE-521.spec.ts` (a caption and a marker
+after a clip set to 2× named in one status notice, none when nothing is left
+behind, and Ctrl+Z restoring the clips), and
 `apps/e2e/tests/escapeartist/clip-speed-editing.spec.ts` (ESCSUITE-522: a 2×
 clip split at the playhead, trimmed by its end handle, every step undone and
 redone, saved and reopened in a fresh browser, each length read off the
