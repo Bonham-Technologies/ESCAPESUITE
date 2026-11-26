@@ -63,6 +63,14 @@ describe('sectionOnTimeline at a fractional end (ESCSUITE-526)', () => {
     expect(sectionOnTimeline({ start: 3.25, end: 5 }, 3.5, 4)).toEqual({ start: 3.25, end: 3.5 })
   })
 
+  // `end - (end - 1/30)` is an ulp under 1/30 for both of these ends.
+  it('keeps a section of exactly one frame, whatever the rounding', () => {
+    expect(3 - (3 - 1 / 30)).toBeLessThan(1 / 30)
+    expect(sectionOnTimeline({ start: 3 - 1 / 30, end: 5 }, 3, 30)).toEqual({ start: 3 - 1 / 30, end: 3 })
+    expect(sectionOnTimeline({ start: end - 1 / 30, end: 5 }, end, 30)).toEqual({ start: end - 1 / 30, end })
+    expect(sectionOnTimeline({ start: end - 1 / 30 + 1e-4, end: 5 }, end, 30)).toBeNull()
+  })
+
   it('leaves a short section wholly inside the timeline to the length checks', () => {
     expect(sectionOnTimeline({ start: 1, end: 1.01 }, end, 30)).toEqual({ start: 1, end: 1.01 })
   })
@@ -70,6 +78,15 @@ describe('sectionOnTimeline at a fractional end (ESCSUITE-526)', () => {
   it('gives the same reason line as a section that starts at the end', () => {
     expect(sectionPastEndReason({ start: hairBefore, end: 5 }, end)).toBe(
       'Cannot export the section: it starts at 0:03, where the timeline ends. Set the in point before the end, or export the full video'
+    )
+  })
+
+  // 2.99 s against an end of 3.01 s: the whole seconds differ, and "starts at
+  // 0:02 and the timeline ends at 0:03" would read as a section with room in it.
+  it('says the start is less than a frame before the end when their seconds differ', () => {
+    expect(sectionOnTimeline({ start: 2.99, end: 5 }, 3.01, 30)).toBeNull()
+    expect(sectionPastEndReason({ start: 2.99, end: 5 }, 3.01)).toBe(
+      'Cannot export the section: it starts at 0:02, less than a frame before the timeline ends at 0:03. Set the in point before the end, or export the full video'
     )
   })
 })

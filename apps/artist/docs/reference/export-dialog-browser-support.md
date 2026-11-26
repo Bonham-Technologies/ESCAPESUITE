@@ -276,7 +276,10 @@ and leave "Export Section (0:03 - 0:03)" enabled for a section shorter than one 
 that reaches the end but starts less than one output frame before it (`1 / VIDEO_EXPORT_FRAME_RATE`,
 the 30 fps both video exporters encode at and the fastest any format does, passed to
 `sectionOnTimeline` by the dialog) is treated as one past the end: the same disabled buttons and the
-same reason line ("it starts at 0:03, where the timeline ends"). A short section wholly inside the
+same reason line ("it starts at 0:03, where the timeline ends"), or, when the start's whole second
+is earlier than the end's (2.99 s against 3.01 s), "it starts at 0:02, less than a frame before the
+timeline ends at 0:03". A section of exactly one frame is kept: the comparison allows a microsecond,
+since `end - (end - 1/30)` is often an ulp under `1/30`. A short section wholly inside the
 timeline is left to the length checks. The unit suite reaches `handleExport`'s refusal through the
 "Try MP4 Instead" retry, which has no disabled state. Regression spec:
 `apps/e2e/tests/regressions/ESCSUITE-526.spec.ts`.

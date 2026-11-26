@@ -62,11 +62,15 @@ test.describe('ESCSUITE-526: Export Section refuses less than a frame before a f
     await page.keyboard.press('o')
     await setSpeed(page, 1.5)
 
-    // Zoom in until a frame is several pixels wide.
+    // Zoom in until a frame is several pixels wide. One step at a time: the
+    // zoom-in handler scales the zoom it last rendered with, so a press sent
+    // before the previous one has rendered would be lost.
     const clipWidth = async () => (await timelineClips(page).first().boundingBox())!.width
-    const unzoomed = await clipWidth()
-    for (let press = 0; press < 4; press++) await page.keyboard.press('=')
-    await expect.poll(clipWidth).toBeGreaterThan(unzoomed * 2)
+    for (let press = 0; press < 4; press++) {
+      const before = await clipWidth()
+      await page.keyboard.press('=')
+      await expect.poll(clipWidth).toBeGreaterThan(before * 1.2)
+    }
 
     // In point half a frame before the end, from a click on the ruler, once
     // the "Out point" notice that sits over the ruler has gone.
