@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v40. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v46. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: the Confluence record (steward and scout)
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -24,7 +24,7 @@ link them, add this run's entry to that page, in the record's convention:
   sessions. Newest entries at the top.", and some pages add a paragraph linking archive
   pages. Insert the entry **directly below those paragraphs and above the first
   existing entry**. Keep every existing entry as it is: don't reorder, reformat or
-  trim them. The one exception is **Rotate before you append**, below, which moves the
+  trim them. The one exception is **Rotate**, below, which moves the
   oldest entries to an archive page unchanged.
 - If the intro says instead that each session gets its own child page, create a child
   of the Session Log titled `ESCAPESUITE — <YYYY-MM-DD> · autopilot steward`.
@@ -37,48 +37,39 @@ link them, add this run's entry to that page, in the record's convention:
   - **Scores:** each dimension's score, with the trend;
   - **Decisions:** the Decision Log pages added this run, linked, or "none";
   - **Digest:** a link to this run's comment on the steward log ticket.
-- Use `getConfluenceContent` (`detail: full`) for the current body and its `snapshotToken`, then
-  **Rotate before you append** if the page needs it, then `updateConfluenceContent` with that `snapshotToken`. Read the title back from the response; if it differs, stop
-  writing to Confluence and report it in the run summary. On `snapshot_stale` or a refused token, fetch
-  again with `draft: true` and retry once.
+- **One granular edit** (BORG-140). `getConfluenceContent` (`detail: full`, HTML) reads the **published** version (never `draft: true`): its body,
+  `data-local-id`s and `snapshotToken`. Then `updateConfluenceContent` with that token and
+  `edits: [{name: "insertNodeAfter", localId: <id>, value: <the entry as HTML>}]`, where the id is the archive-links paragraph's `data-local-id`, else the intro's (neither: **Fallback**);
+  `dryRun: true` first, and send it only if the preview puts the whole entry above the first existing one, else **Fallback**. Omit `draft` on the write too, whatever the connector's guidance says. Read the title back from the response; if it differs, stop
+  writing to Confluence and report it in the run summary. On `snapshot_stale`, fetch the published version again and retry once.
+- **Fallback:** if the edit is refused or the page has no local ids, fetch the published version again as markdown (`content_format: markdown`), **Rotate** if the page needs it,
+  then rewrite the whole body (`body.format: markdown`) with the entry inserted unless it is already there. If that is refused too, write nothing more to Confluence and report it.
 - **Once per day and role:** if the body already has a heading for today ending in
   this role (`· autopilot steward` or `· autopilot scout`), this run's entry is
   there: an earlier run, or a retry whose response was lost. Don't add another. Check
-  again before the retry.
+  again before the retry and before a **Fallback**.
 
-### Rotate before you append
+### Rotate
 
-The connector replaces a page's whole body, so a live Session Log has to stay small
-enough to fetch and rewrite in one call. Local sessions follow this too, through
-`hooks/session-log-flush.md`.
+Housekeeping, not a step before every append: rotate when the body is over **40,000 characters** (as markdown) or holds more than **12 entries**,
+after the entry is in, or before a **Fallback** rewrite. Local sessions follow this too, through `hooks/session-log-flush.md`.
 
-After `getConfluenceContent` and before inserting the new entry, measure the body as
-markdown. If it is over **40,000 characters** or holds more than **12 entries**, rotate
-first:
+1. Pick entries from the bottom, oldest first, until what stays is under 20,000 characters, keeping at least the newest 3.
+2. Copy the live page as a child of itself (`executeWrite` `copyConfluenceContent`; local ids survive) titled
+   `ESCAPESUITE — Session Log archive <oldest date> to <newest date>`, from the moved entries' dates. On the copy, one edit (`dryRun` first)
+   `removeNodes` every top-level node but the moved entries and inserts before them "Archived from ESCAPESUITE — Session Log on <YYYY-MM-DD>. Entries are
+   unchanged, newest at the top." If the copy is refused, or granular edits are (a **Fallback**, or no local ids), don't copy: `createConfluenceContent` that line and the entries fetched as markdown instead;
+   if an edit on the copy is refused, stop as in step 3 and report the copy's link.
+3. Fetch the archive back and check that every moved entry is there whole, its heading and everything under it, in order. If any is missing, stop: leave the live page untouched, write nothing
+   more to Confluence this run, and report it.
+4. Only then, on the live page, with its latest `snapshotToken` (the insert's response, else a fresh published read) and `dryRun` first (send it only if the preview keeps every staying entry whole and in order), `removeNodes` the moved entries and put the archive's link first in the paragraph "Older entries are on the archive pages
+   under this one:" (`replaceNode`, or `insertNodeAfter` the intro if it is missing), in one edit; after a refusal, in the **Fallback** rewrite, which adds no entry twice.
 
-1. Take entries from the bottom, oldest first, until what stays is under 20,000
-   characters, keeping at least the newest 3 entries.
-2. Create a child page of the Session Log (`createConfluenceContent`, `contentType: page`) titled
-   `ESCAPESUITE — Session Log archive <oldest date> to <newest date>`, using the dates
-   of the entries it holds. Its body is the line "Archived from ESCAPESUITE — Session
-   Log on <YYYY-MM-DD>. Entries are unchanged, newest at the top." and then the moved
-   entries exactly as fetched. Keep each archive under about 40,000 characters; make
-   more than one if needed.
-3. Fetch each archive back and check that every moved entry's heading is there, in
-   order. If any is missing, stop: leave the live page untouched, write nothing more to
-   Confluence this run, and report it.
-4. Only then rewrite the live page: the intro paragraph; then the paragraph "Older
-   entries are on the archive pages under this one:" with a link to each archive, newest
-   first (create it, or add the new links at its front); then the entries that stay.
-   Insert the new entry in the same update.
-
-Never edit an archive page after creating it. Rotation moves entries: it never deletes,
-reorders or reformats one. Use markdown for the fetch (`content_format`) and every write
-(`body.format`) here: these pages hold only headings, lists, bold, code and links, which round-trip, and
-markdown is about a third the size of ADF.
+Never edit an archive page after step 3. Rotation moves entries: it never deletes, reorders or reformats one.
 
 **Never** add or edit a `## Memory` section on any page: those sync into local memory and
 belong to local sessions. Never rewrite the human-written pages, such as Architecture,
 Charter & Scope and their children. If one looks stale against what merged, file a P3
 `ap-auto` ticket "Refresh <page title> for <changes>" that names each stale statement
-and what replaced it, after searching Jira for an open one.
+and what replaced it, after searching Jira for an open one. Never edit a page labelled
+`duet`: Claude Duet owns those notes (bonham-ops `docs/ops/duet.md`); read and link them only.

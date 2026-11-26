@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v40. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v46. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: fleet role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -9,11 +9,12 @@ Part of the autopilot policy. `.claude/rules/autopilot.md` and
 The fleet role runs as bonham-ops's steward, in place of the dimension sweep under
 **Steward**. The run still starts with **Main must stay green** and **Reconcile**, and
 everything else in `steward.md` still applies: **Security sweep** of this repo, **Watch
-tickets**, **Decision Log** and **Record in Confluence**; the **Fleet digest** below
+tickets**, **Duet intake** (`steward.md`) for this project and for BTS, which has no steward,
+**Decision Log** and **Record in Confluence**; the **Fleet digest** below
 replaces the **Weekly digest**. bonham-ops is the only repo where the role runs. The
 projects are the `autopilot` entries of `autopilot/fleet.json` in this checkout; skip the
 entry with `"fleet": true`, which is this repo. `on-request` and `tracked` entries
-(`repos.md`) are only read, in their lane's section of the digest (`bin/fleet lanes`). Its panel row's `Steward paused: yes` skips only
+(`repos.md`) are only read, in their lane's section of the digest (`bin/fleet lanes`). BTS also gets **Duet intake**. Its panel row's `Steward paused: yes` skips only
 the signal table's **Policy tickets**; the digest still runs. Its `Steward ticket cap`
 caps security tickets only; Policy tickets keep their cap of 10.
 
@@ -33,7 +34,7 @@ For each project, read:
    - decisions answered: the `ap-asked` query under **Decision Log**, with `updated >= -7d`;
 5. the ready backlog, split `ap-auto` / `ap-owner-merge` / `ap-feature-*` (a feature
    ticket counts only under feature):
-   `project = <jiraKey> AND statusCategory != Done AND labels in (ap-auto, ap-owner-merge) AND labels not in (needs-owner, needs-operator, ap-decision, ap-watch, ap-triage, ap-merging)`;
+   `project = <jiraKey> AND statusCategory != Done AND labels in (ap-auto, ap-owner-merge) AND labels not in (needs-owner, needs-operator, ap-decision, ap-watch, ap-triage, ap-merging) AND (labels not in (duet) OR labels = duet-verified)`;
 6. **its repo's `main`, read directly.** Attach the repo read-only (`add_repo`), then
    read the `policy v<N>` header line of `.claude/rules/autopilot.md`
    (`gh api 'repos/<repo>/contents/.claude/rules/autopilot.md?ref=main' --jq .content | base64 -d | head -1`)
@@ -80,7 +81,9 @@ statusCategory != Done`.
 1. Check every claim about a product (what it does, status, licence, links, "open
    source" wording) against its sources of truth, read as the inputs above say: the
    README on `main` (input 6), the latest release, the Confluence record, its `public`
-   flag and its newest digest. File only a claim you checked.
+   flag and its newest digest. Brand and positioning claims go against the `owner-approved`
+   Business & Brand Handbook (`docs/ops/chatgpt.md`), below code and release evidence for
+   what a product does. File only a claim you checked.
 2. File each inaccurate or stale claim once, unless an open finding has it, in the
    site's Jira key: the claim, the evidence and the corrected wording, labels
    `ap-owner-merge` and `ap-site-review`.
@@ -110,17 +113,19 @@ statusCategory != Done`.
 ### Fleet digest
 
 A comment on this project's steward log, found as **Weekly digest** says. **Waiting on
-you** comes first, then **Decided this week**, then **Missed runs**, then one section per lane in `bin/fleet lanes`
+you** comes first, then **Decided this week**, then **Missed runs**, then **Unreviewed pushes**, then one section per lane in `bin/fleet lanes`
 order, headed by its title (**Products**, **Sites and brand**, **Platform**,
 **Prototypes**), then **Policy findings filed this run**, linked, or "none".
 
 - **Waiting on you**, every lane, grouped by project, every item linked: each project's waiting
   tickets and `needs-owner` PRs with its **mergeable now** count (from its digest, else
   counted as the steward does), and this project's own, with each refresh, paste and
-  policy ticket under the project it concerns. This is the owner's inbox.
+  policy ticket under the project it concerns, and this repo's and Bonham.Tech's unattributed
+  PRs (**Weekly digest**). This is the owner's inbox.
 - **Decided this week:** the "Decisions" rows of the last 7 days (**Decisions**), each with
   its scope and follow-through: landed (Done, merged, published), open (linked) or not needed;
   or "none". File each "for the fleet run" now (unless BORG has it: search its link), as **Decisions** routes it, and link it here.
+- **From Duet**, as **Weekly digest** gives it, for BORG and BTS, with the `duet` pages listed once; each product's tickets come from its digest.
 - **Missed runs.** A task whose `last_run.status` is not `ROUTINE_RUN_STATUS_SUCCEEDED`,
   or whose last run is older than its previous scheduled time (a builder's `builder` cron, the shared
   tasks' `fleetTasks`, in `fleet.json`), is missed: quote the status and time. The expected tasks are `bin/fleet tasks`. Skip this run's own task and a
@@ -129,13 +134,16 @@ order, headed by its title (**Products**, **Sites and brand**, **Platform**,
   them per repo by trace alone. Without the task listing, fall back to traces: a
   steward or scout always leaves one per repo on its days (input 3), a digest comment or a Session
   Log entry, so a repo whose day passed with no trace is missed. A builder with nothing to do
-  leaves none, so flag a builder only when ready tickets (`labels in (ap-auto,
-  ap-owner-merge)`, not Done) existed at the start of its window and none changed status
+  leaves none, so flag a builder only when ready tickets (input 5's query, so no unverified
+  `duet` ones) existed at the start of its window and none changed status
   or gained a PR-link comment across two consecutive scheduled runs. The cause is
   invisible from here: write only "no trace of the <role> run since <date>". A steward
   or scout whose later run says "caught up <date>" for that due day is listed as "caught
   up <date>", not missed, and doesn't count toward "a missed run in two consecutive weeks"
   (**Policy tickets**) unless it caught up two weeks running.
+
+- **Unreviewed pushes** (BORG-141): each `autopilot` repo's PRs merged in the last 7 days (`gh api 'repos/<repo>/pulls?state=closed&sort=updated&direction=desc&per_page=100'`, attached as input 6), except refresh PRs (head `autopilot/refresh-v*`) and PRs opened before the repo's `main` took policy v43 (a repo still below v43 gets one line, "no markers before v43"), with a commit (by `commit.committer.date`) dated after the PR's `created_at` (`gh api 'repos/<repo>/pulls/{n}/commits'`) other than one by `dependabot[bot]` or a merge whose second parent is on `main` (`compare/<that sha>...main` status `ahead` or `identical`: an update-branch merge),
+  where no owner comment (`issues/{n}/comments`) names the last such commit, or a later one, as `Head:` under a first line `<!-- autopilot:re-reviewed -->` (on a Dependabot PR, `<!-- autopilot:dependabot-triage -->` with a `Review:` line); each linked, or "none". Each one also goes under **Waiting on you**.
 
 **Products**, the `autopilot` products. Setup, Capacity and the control panel list only
 `autopilot` repos: an `on-request` or `tracked` repo gets no panel row; its level is its switch.
@@ -249,12 +257,12 @@ version, close the open one for the older version the same way.
 
 The fleet role reads the product projects and never writes to a product's Jira project
 except to file **Public site review** findings, never opens a PR or comments in a
-product repo, and never writes to a product's Session Log. Besides the steward duties
-named under **Fleet** (a **Main must stay green** revert PR and the **Decision Log**),
+product repo, and never writes to a product's Session Log. Besides the steward duties named
+under **Fleet** (a **Main must stay green** revert PR and the **Decision Log**),
 its only writes are tickets in this project, site findings, the steward log (this
 project's digest comment), this repo's `propagation` issues, the control
-panel's **Status** section and this repo's Session Log entry. Its tickets live in this
-project, so no product builder can take them; its owner-action tickets carry
+panel's **Status** section and this repo's Session Log entry. **Duet intake** in BTS (its label,
+comment or close) is a steward duty too. Its tickets live in this project, so no product builder can take them; its owner-action tickets carry
 `needs-operator`, so no builder, this repo's included, takes those. Its **Record in
 Confluence** entry goes to this repo's Session Log, with the role name `autopilot fleet`
 in the heading and the once-per-day check; in place of **Scores** it lists the tickets
