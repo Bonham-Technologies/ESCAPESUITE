@@ -136,7 +136,7 @@ length.
 > page lists exactly what goes out.
 >
 > How it's built: I work with AI coding agents. They write most of the code and the
-> tests; I decide what gets built and set the rules for what ships, and every change has
+> tests; I set the direction and the rules for what ships, and every change has
 > to pass the full test suite in CI before it merges. Everything is in the open on
 > GitHub under Apache-2.0, including the tests and the changelog.
 >
