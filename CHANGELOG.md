@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- ESCAPEARTIST: "Export Section" no longer offers a section shorter than one frame. When the in point sits less than a frame before the end of the timeline (after speeding a clip up to 1.5×, the end can fall between two frames), the section can't be exported and the dialog says why, as it does for a section that starts after the end; it used to offer "Export Section (0:03 - 0:03)" (ESCSUITE-526).
 - Tests: an e2e spec edits a sped clip in ESCAPEARTIST the way a user does, in Chromium and Firefox: a 2× clip is split at the playhead, trimmed by its end handle, and every step undone and redone, checking each clip's length on the timeline; the project is saved and reopened in a fresh browser with its speed and lengths intact; and a take recorded as linked screen and microphone parts is set to 0.5×, cut, undone and redone with its two rows in step (ESCSUITE-522).
 - ESCAPEARTIST: when the clip inspector's Speed section can't change a clip's speed, screen readers now announce why, because the line that says so is filled in a status region already in the page instead of appearing with its text in it (ESCSUITE-523).
 - ESCAPEARTIST: changing a clip's speed now says, in one notice, which captions, overlays and markers on other tracks it left where they were, in Remove silences' words (for example "1 clip on other tracks did not move: 1 caption. 1 marker did not move."); there is no notice when nothing was left behind (ESCSUITE-521).

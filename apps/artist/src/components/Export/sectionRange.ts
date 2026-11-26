@@ -1,3 +1,4 @@
+import { VIDEO_EXPORT_FRAME_RATE } from '../../core/exportTypes'
 import { formatTime } from '../../utils/timeUtils'
 
 /** A selected stretch of the timeline, in seconds. */
@@ -15,17 +16,30 @@ export interface SectionRange {
  * straddles the end ends at it; one that starts at or after the end, or a
  * timeline with no length, has nothing to export. A section inside the
  * timeline is returned as it is.
+ *
+ * A section that reaches the end but starts less than one output frame
+ * (`1 / frameRate`) before it has nothing to export either (ESCSUITE-526): a
+ * timeline end that is no whole number of frames (a 5 s clip at 1.5x ends at
+ * 3.333... s) can sit a rounding error after an in point the user meant to put
+ * at it. `frameRate` is the export's output rate; the video exporters' 30 fps
+ * when the caller does not name one.
  */
-export function sectionOnTimeline(range: SectionRange, timelineSeconds: number): SectionRange | null {
+export function sectionOnTimeline(
+  range: SectionRange,
+  timelineSeconds: number,
+  frameRate: number = VIDEO_EXPORT_FRAME_RATE
+): SectionRange | null {
   // Written as "not before the end" so a NaN length also has nothing to export.
   if (!(range.start < timelineSeconds)) return null
+  if (range.end < timelineSeconds) return range
+  if (timelineSeconds - range.start < 1 / frameRate) return null
   return range.end <= timelineSeconds ? range : { start: range.start, end: timelineSeconds }
 }
 
 /**
- * Why a section {@link sectionOnTimeline} finds wholly past the end cannot be
- * exported, with the two ways out. No closing full stop: the dialog adds it,
- * as it does to every length reason.
+ * Why a section {@link sectionOnTimeline} finds wholly past the end, or within
+ * a frame of it, cannot be exported, with the two ways out. No closing full
+ * stop: the dialog adds it, as it does to every length reason.
  */
 export function sectionPastEndReason(range: SectionRange, timelineSeconds: number): string {
   const start = formatTime(range.start)

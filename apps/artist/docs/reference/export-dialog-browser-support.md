@@ -270,6 +270,17 @@ in its label, and "Export Full Video" stays enabled. `handleExport` also refuses
 click can never fall through to the whole timeline. Regression spec:
 `apps/e2e/tests/regressions/ESCSUITE-519.spec.ts`.
 
+**Less than a frame before the end is past it (ESCSUITE-526).** A timeline end need not be a whole
+number of frames (a 5 s clip at 1.5× ends at 3.333… s), so an in point could sit a sliver before it
+and leave "Export Section (0:03 - 0:03)" enabled for a section shorter than one frame. A section
+that reaches the end but starts less than one output frame before it (`1 / VIDEO_EXPORT_FRAME_RATE`,
+the 30 fps both video exporters encode at and the fastest any format does, passed to
+`sectionOnTimeline` by the dialog) is treated as one past the end: the same disabled buttons and the
+same reason line ("it starts at 0:03, where the timeline ends"). A short section wholly inside the
+timeline is left to the length checks. The unit suite reaches `handleExport`'s refusal through the
+"Try MP4 Instead" retry, which has no disabled state. Regression spec:
+`apps/e2e/tests/regressions/ESCSUITE-526.spec.ts`.
+
 **A WebM failure can offer MP4 as a retry, the mirror of MP4's own "Try WebM Instead."** MP4's
 failure has always replaced the dialog with a dedicated recovery screen (`mp4FailedError`) offering
 WebM as the alternative, regardless of what kind of error it was — gated on `webmSupported`

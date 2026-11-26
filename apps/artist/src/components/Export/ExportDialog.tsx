@@ -35,6 +35,7 @@ import {
   exportLengthReason,
   exportedLengthReason,
   EXPORT_TOO_LONG_REASON,
+  VIDEO_EXPORT_FRAME_RATE,
   formatExportLog,
   projectHasAudio as computeProjectHasAudio,
 } from '../../core/exportTypes';
@@ -200,10 +201,17 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // points where they were, and the exporters fill whatever lies past the end
   // with black and silence. A section that straddles the end is clamped to
   // it; one wholly past the end has nothing to export (`timeRange` is then
-  // undefined while `selectedRange` is set) and the dialog says why.
+  // undefined while `selectedRange` is set) and the dialog says why. One that
+  // reaches the end but starts less than a frame before it is refused the
+  // same way (ESCSUITE-526). The frame is the video exporters' (30 fps), the
+  // fastest any format encodes at, so a section kept holds at least a frame
+  // in every format.
   const timelineSeconds = calculateTimelineDuration(clips);
   const timeRange = useMemo(
-    () => (selectedRange ? sectionOnTimeline(selectedRange, timelineSeconds) ?? undefined : undefined),
+    () =>
+      selectedRange
+        ? sectionOnTimeline(selectedRange, timelineSeconds, VIDEO_EXPORT_FRAME_RATE) ?? undefined
+        : undefined,
     [selectedRange, timelineSeconds]
   );
   const sectionPastEnd = selectedRange !== undefined && timeRange === undefined;

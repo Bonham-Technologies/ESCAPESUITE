@@ -2479,6 +2479,61 @@ describe('ExportDialog', () => {
         expect(webmArgs()[2].timeRange).toEqual({ start: 2, end: 5 })
       })
     })
+
+    // ESCSUITE-526: at 1.5x the 5 s clip ends at 3.333... s, no whole number
+    // of frames. An in point a rounding error before that end left less than a
+    // frame on the timeline, and "Export Section (0:03 - 0:03)" was enabled.
+    describe('a section less than one frame before a fractional end (ESCSUITE-526)', () => {
+      const AT_END =
+        'Cannot export the section: it starts at 0:03, where the timeline ends. Set the in point before the end, or export the full video'
+      const HAIR_BEFORE_END = 3.333333333333333
+
+      it('refuses it like a section past the end, with the same reason line', () => {
+        act(() => {
+          store().setClipSpeed('clip1', 1.5)
+        })
+        useEditorStore.setState({ inPoint: HAIR_BEFORE_END, outPoint: 5 })
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+        // Before the fix this was "Export Section (0:03 - 0:03)", enabled. Now
+        // it reads like any section past the end: the range the user chose.
+        const section = screen.getByRole('button', { name: /Export Section/ })
+        expect(section).toBeDisabled()
+        expect(section).toHaveAttribute('title', AT_END)
+        expect(screen.getByText(`${AT_END}.`)).toBeVisible()
+        expect(screen.getByRole('button', { name: 'Export Full Video' })).toBeEnabled()
+      })
+
+      // The section buttons disable themselves, so a click on them never
+      // reaches handleExport. The MP4 retry offered after a WebM ExportError
+      // has no disabled state: it is the route that drives handleExport's own
+      // refusal, after the section has slipped to within a frame of the end.
+      it('refuses it in handleExport too, reached through the MP4 retry', async () => {
+        useEditorStore.setState({ inPoint: HAIR_BEFORE_END, outPoint: 5 })
+        mockExportToWebM.mockRejectedValue(new ExportError('No supported video codec found.', []))
+        const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+        const debugLog = vi.spyOn(console, 'debug').mockImplementation(() => {})
+        try {
+          render(<ExportDialog isOpen={true} onClose={onClose} />)
+          fireEvent.click(screen.getByRole('button', { name: 'Export Section (0:03 - 0:05)' }))
+          await waitFor(() => expect(screen.getByRole('button', { name: 'Try MP4 Instead' })).toBeInTheDocument())
+
+          // The clip is sped up underneath the open dialog: its end is now
+          // a rounding error past the in point.
+          act(() => {
+            store().setClipSpeed('clip1', 1.5)
+          })
+          fireEvent.click(screen.getByRole('button', { name: 'Try MP4 Instead' }))
+          await settle()
+
+          // Neither the sliver of a section nor, in its place, the whole timeline.
+          expect(mockExportToMP4).not.toHaveBeenCalled()
+        } finally {
+          errorLog.mockRestore()
+          debugLog.mockRestore()
+        }
+      })
+    })
   })
 
   describe('GIF export', () => {
