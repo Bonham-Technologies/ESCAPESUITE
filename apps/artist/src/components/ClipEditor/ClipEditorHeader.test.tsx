@@ -39,7 +39,8 @@ describe('ClipEditorHeader', () => {
     renderHeader()
 
     expect(screen.getByText('Video Clip')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'intro.mp4' })).toBeInTheDocument()
+    // Level 2: the page's only h1 is the logo, so level 3 skipped one (ESCSUITE-524).
+    expect(screen.getByRole('heading', { level: 2, name: 'intro.mp4' })).toBeInTheDocument()
   })
 
   it('shows duration and position as timecodes', () => {

@@ -37,7 +37,11 @@ export function ClipEditorHeader({ clipTypeLabel, name, duration, position, trac
       <div className={styles.header}>
         <div className={styles.headerInfo}>
           <span className={styles.clipType}>{clipTypeLabel}</span>
-          <h3 className={styles.title}>{name}</h3>
+          {/* An h2, not an h3: the page's only h1 is the ESCAPEARTIST logo and
+              nothing between them is a heading, so level 3 skipped a level
+              (axe: heading-order, ESCSUITE-524). `.title` sets every property
+              a UA stylesheet would differ on, so it renders the same. */}
+          <h2 className={styles.title}>{name}</h2>
         </div>
         <button
           className={styles.deleteButton}

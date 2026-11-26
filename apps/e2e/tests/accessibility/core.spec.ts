@@ -541,6 +541,50 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     expect(valid).toBe(true)
   })
 
+  // ESCSUITE-524: the idle check above never sees the inspector's selected
+  // state, whose clip name was an h3 straight under the h1 logo, so axe flagged
+  // `heading-order` with a clip selected and again with the export dialog open
+  // over it. The rule's moderate impact kept it out of every serious/critical
+  // filter in this file, so it is asserted on its own here.
+  test('headings stay in order with a clip selected and the export dialog open (ESCSUITE-524)', async ({
+    page,
+    browserName,
+  }) => {
+    test.setTimeout(120_000)
+    // Same limitation as "the clip inspector's controls have associated
+    // labels": the import stores a Blob in IndexedDB.
+    test.skip(
+      browserName === 'webkit',
+      'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+    )
+
+    const headingOrder = async () => {
+      const results = await runAxeCheck(page, { disableRules: ['color-contrast'] })
+      return results.violations
+        .filter((v) => v.id === 'heading-order')
+        .map((v) => ({ nodes: v.nodes, first: v.firstNode?.html }))
+    }
+
+    await test.step('a clip selected', async () => {
+      await importMediaAndAddToTimeline(page, AV_FIXTURE_WEBM)
+      await openMobileInspector(page)
+      await page.locator('[data-clip-id]').first().click()
+      // Anchor on the heading the audit is about: an inspector still showing
+      // "Select a clip to edit" has no heading to put out of order.
+      await expect(inspector(page).getByRole('heading', { name: 'tone-gap.webm' })).toBeVisible()
+
+      expect.soft(await headingOrder(), 'heading-order with a clip selected').toEqual([])
+    })
+
+    await test.step('the export dialog open over it', async () => {
+      await openExportDialog(page)
+      await waitForAnimationsToFinish(page.locator('[role="dialog"]').first())
+      await expect(inspector(page).getByRole('heading', { name: 'tone-gap.webm' })).toBeAttached()
+
+      expect.soft(await headingOrder(), 'heading-order with the export dialog open').toEqual([])
+    })
+  })
+
   test('modals have proper dialog role', async ({ page }) => {
     // Export is disabled until the timeline holds a clip
     await seedTextClip(page)
