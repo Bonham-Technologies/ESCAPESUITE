@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v40. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v47. Edit there and re-run bin/vendor-claude-setup. -->
 # Public repositories
 
 Every role reads this file before it acts on a public repo (policy, **Always**).
@@ -21,10 +21,10 @@ work through PRs, a changelog, a roadmap and issue intake, never by mirroring ti
   written for an outside reader: no internal hostnames, customer names, Jira or
   Confluence URLs, or private context. The key goes in as plain text, `Ticket: CRL-12`,
   never a link.
-- **Builder:** each ticket's PR adds one line under `## Unreleased` in `CHANGELOG.md`
-  (Keep a Changelog; create it if missing), except "Refresh ROADMAP.md". If
-  update-branch conflicts only there, merge `main` by hand keeping both lines. A
-  release moves those lines under its version, and its notes reuse them.
+- **Builder** (BORG-139): each ticket's PR, except "Refresh ROADMAP.md" and the release PR, adds one file, `changelog.d/<KEY>.md` (its ticket key, such as `CRL-12.md`; if it exists, edit its line),
+  holding one line, the Keep a Changelog entry it would otherwise add under `## Unreleased` in `CHANGELOG.md`, and never edits `CHANGELOG.md` (AP-2's fix PR may create it), so parallel PRs don't conflict.
+  The release PR (the release runbook's step 6, and every later release) moves the `## Unreleased` lines and every fragment's line under its version in `CHANGELOG.md` (created if missing; `## Unreleased` stays, empty),
+  deletes those fragments, and its notes reuse those lines; a fragment that merges after the release PR is cut waits for the next release.
 - **Steward, roadmap:** each steward day, write `ROADMAP.md` from Jira with `## Now`,
   `## Next` and `## Recently shipped`, in short public summaries of your own. Leave out
   unfixed `ap-security` tickets, `needs-operator`, unapproved `ap-decision` and anything
