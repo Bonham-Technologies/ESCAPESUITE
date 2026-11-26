@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.21.1
+
+### Patch Changes
+
+- 44b03cd: The offline ESCAPECRAFT and ESCAPEARTIST files now lock themselves down: each carries a Content-Security-Policy that the browser enforces, so the page can load only what is inside the file and cannot fetch from or send to any server. In the offline ESCAPEARTIST file, a `?video=` address on a server is now refused with a message saying why; an address that carries the video itself still loads. The Known limitations page and "Verify your download" explain how to read the policy and what it does not cover, such as links you click, the browser's own downloads and extensions.
+- b725a67: Screen readers now hear the inspector's headings in order: the selected clip's name is announced as the level of heading that comes right after the page title, instead of skipping a level. It looks the same as before.
+- 279383f: "Export Section" no longer offers a section shorter than one frame. When the in point sits less than a frame before the end of the timeline, which can happen after speeding a clip up (at 1.5× a 5 second clip ends between two frames), the section can't be exported and the export dialog says why, just as it does for a section that starts after the end. It used to offer "Export Section (0:03 - 0:03)" for a file with almost nothing in it.
+
 ## 2.21.0
 
 ### Minor Changes
