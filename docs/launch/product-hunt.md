@@ -11,9 +11,11 @@ Ticket: ESCSUITE-527.
 **Launch link:** `https://escapesuite.tech`
 
 This is the only place the link is written; everything below says "the launch link".
-escapesuite.tech already serves the apps (escapesuite.io forwards to it), but the work that
-makes it the canonical host in the site's own tags and files (Ticket: ESCSUITE-506) has not
-landed yet. Check that it has before scheduling, so the link never changes after launch.
+When you paste a draft, put the link itself where it says "the launch link".
+escapesuite.tech already serves the apps, escapesuite.io forwards to it, and the hub's
+canonical tags name it; the last references to the old host are tracked as Ticket:
+ESCSUITE-506. Check that it is finished before scheduling, so the link never changes after
+launch.
 If the launch host changes, edit the line above and nothing else.
 
 The no-signup "try it" paths, all under the launch link:
@@ -24,7 +26,8 @@ The no-signup "try it" paths, all under the launch link:
 | Record (ESCAPECRAFT) | `/craft/` |
 | Edit (ESCAPEARTIST) | `/artist/` |
 
-The offline single-file build is on the GitHub releases page; the hub links to it.
+The offline builds (one self-contained HTML file each for ESCAPECRAFT and ESCAPEARTIST)
+are on the GitHub releases page; the hub's "All downloads" link goes there.
 
 ## Form limits, as checked on 2026-11-26
 
@@ -63,11 +66,11 @@ Pick one (character counts in brackets):
 > ESCAPE Suite is a free, open-source screen recorder and video editor that runs entirely
 > in your browser. Record your screen, webcam and microphone, trim the mistakes, blur
 > anything sensitive, add captions and text, and export WebM, MP4 or GIF. Your footage
-> is never uploaded: no account, no sign-up, no server doing the work. There is also a single
-> HTML file you can copy onto an air-gapped network and open with no internet at all.
-> Apache-2.0.
+> is never uploaded: no account, no sign-up, no server doing the work. The recorder and
+> editor also come as single HTML files you can copy onto an air-gapped network and open
+> with no internet at all. Apache-2.0.
 
-(444 characters.)
+(466 characters.)
 
 ## Launch tags
 
@@ -116,21 +119,26 @@ length.
 
 > Hi Product Hunt! I'm Matty, and I made ESCAPE Suite.
 >
-> Most screen recorders want you to upload your
-> footage to someone else's server before you can trim it or share it. That's a
-> non-starter when the thing on your screen is an internal system, a customer's data, or
-> a network that isn't connected to the internet in the first place.
+> Many online screen recorders upload your footage to their own servers before you can
+> trim it or share it. That's a non-starter when the thing on your screen is an internal
+> system, a customer's data, or a network that isn't connected to the internet in the
+> first place.
 >
 > So ESCAPE Suite does all of it in the browser. ESCAPECRAFT records your screen, webcam
 > and microphone; ESCAPEARTIST trims, blurs, captions and exports to WebM, MP4 or GIF.
 > Every frame is processed on your own machine. There's no account and nothing to
-> install, and if you need it on an air-gapped network, the whole editor is one HTML file
-> you can copy across and open offline.
+> install, and if you need it on an air-gapped network, the recorder and the editor are
+> each one HTML file you can copy across and open offline.
+>
+> To be straight about what does touch a network: the hosted site counts page views and a
+> few events (like "Export Completed") with Vercel Web Analytics. Nothing you record, type
+> or export is ever sent, and the offline files send nothing at all. The Known limitations
+> page lists exactly what goes out.
 >
 > How it's built: I work with AI coding agents. They write most of the code and the
 > tests; I decide what gets built and set the rules for what ships, and every change has
-> to pass the tests and an independent review before it merges. Everything is in the open
-> on GitHub under Apache-2.0, including the tests and the changelog.
+> to pass the full test suite in CI before it merges. Everything is in the open on
+> GitHub under Apache-2.0, including the tests and the changelog.
 >
 > What I'd love feedback on:
 > - Where does recording or exporting fall over in your browser? (Firefox and Safari have
@@ -161,7 +169,7 @@ length.
 
 ### The day after
 
-- [ ] Note visits, sign-ups and GitHub stars from the launch.
+- [ ] Note visits and GitHub stars from the launch (there are no sign-ups to count).
 
 ### LinkedIn post (personal profile, first person)
 
@@ -169,7 +177,7 @@ length.
 >
 > It's a screen recorder and video editor that runs entirely in your browser. You record,
 > trim, blur and caption a how-to video, and your footage is never uploaded anywhere. There's
-> no account, and there's a single-file version for networks with no internet at all.
+> no account, and there are single-file versions for networks with no internet at all.
 >
 > I built it for the people who make training and how-to videos inside organisations
 > where "just upload it to our cloud" isn't an option.

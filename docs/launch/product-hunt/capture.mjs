@@ -193,6 +193,9 @@ async function main() {
   const textArea = artist.locator('textarea[placeholder="Enter text..."]')
   await textArea.waitFor()
   await textArea.fill('100% local. No uploads.')
+  // Deselect the overlay so its handles don't cover the text in the preview
+  await textArea.evaluate((el) => el.blur())
+  await artist.keyboard.press('Escape')
   await beat(1200) // let any toast clear
   await artist.screenshot({ path: join(outDir, '3-artist-editing.png') })
 
