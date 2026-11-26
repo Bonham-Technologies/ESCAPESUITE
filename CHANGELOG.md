@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- Docs: a Product Hunt launch kit for ESCAPE Suite in `docs/launch/product-hunt.md`: name, tagline and description within the launch form's limits, the maker's first comment, launch tags, four gallery shots of the live apps with a 240×240 logo, a script that re-takes them, and a launch-day checklist with draft posts that ask for feedback, never upvotes (ESCSUITE-527).
 - Tests: an e2e spec edits a sped clip in ESCAPEARTIST the way a user does, in Chromium and Firefox: a 2× clip is split at the playhead, trimmed by its end handle, and every step undone and redone, checking each clip's length on the timeline; the project is saved and reopened in a fresh browser with its speed and lengths intact; and a take recorded as linked screen and microphone parts is set to 0.5×, cut, undone and redone with its two rows in step (ESCSUITE-522).
 - ESCAPEARTIST: when the clip inspector's Speed section can't change a clip's speed, screen readers now announce why, because the line that says so is filled in a status region already in the page instead of appearing with its text in it (ESCSUITE-523).
 - ESCAPEARTIST: changing a clip's speed now says, in one notice, which captions, overlays and markers on other tracks it left where they were, in Remove silences' words (for example "1 clip on other tracks did not move: 1 caption. 1 marker did not move."); there is no notice when nothing was left behind (ESCSUITE-521).
